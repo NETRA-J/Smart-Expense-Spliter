@@ -5,11 +5,10 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import GroupDetails from './pages/GroupDetails';
-import MemberForm from './pages/MemberForm';
-import ExpenseForm from './pages/ExpenseForm';
 import SplitExpense from './pages/SplitExpense';
 import BalancesDashboard from './pages/BalancesDashboard';
 import MemberHistory from './pages/MemberHistory';
+import SettlementHistory from './pages/SettlementHistory';
 import Navbar from './components/Navbar';
 
 const ProtectedRoute = ({ children }) => {
@@ -42,12 +41,9 @@ function AppRoutes() {
       <Route path="/register" element={<Register />} />
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/groups/:groupId" element={<ProtectedRoute><GroupDetails /></ProtectedRoute>} />
-      <Route path="/groups/:groupId/members/add" element={<ProtectedRoute><MemberForm /></ProtectedRoute>} />
-      <Route path="/groups/:groupId/members/:memberId/edit" element={<ProtectedRoute><MemberForm /></ProtectedRoute>} />
-      <Route path="/groups/:groupId/expenses/add" element={<ProtectedRoute><ExpenseForm /></ProtectedRoute>} />
-      <Route path="/groups/:groupId/expenses/:expenseId/edit" element={<ProtectedRoute><ExpenseForm /></ProtectedRoute>} />
       <Route path="/groups/:groupId/expenses/:expenseId/split" element={<ProtectedRoute><SplitExpense /></ProtectedRoute>} />
       <Route path="/groups/:groupId/balances" element={<ProtectedRoute><BalancesDashboard /></ProtectedRoute>} />
+      <Route path="/groups/:groupId/settlements" element={<ProtectedRoute><SettlementHistory /></ProtectedRoute>} />
       <Route path="/groups/:groupId/members/:memberId/ledger" element={<ProtectedRoute><MemberHistory /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { 
+import {
   getGroupDetail, deleteGroup, getMembers, deleteMember,
-  getExpenses, deleteExpense, getGroupBudget, setGroupBudget, inviteMember
+  getExpenses, deleteExpense, getGroupBudget, setGroupBudget, inviteMember,
+  updateGroup, addMember, updateMember, createExpense, updateExpense
 } from '../services/api';
 import { AuthContext } from '../context/AuthContext';
-import { 
-  Users, DollarSign, Settings, Trash2, Edit3, Plus, 
+import {
+  Users, DollarSign, Settings, Trash2, Edit3, Plus,
   ChevronRight, Calendar, AlertTriangle, ArrowLeft,
-  ChevronDown, ChevronUp, Bell, DollarSign as MoneyIcon
+  ChevronDown, ChevronUp, Bell, DollarSign as MoneyIcon,
+  X, RefreshCw, AlertCircle
 } from 'lucide-react';
+import Dropdown from '../components/Dropdown';
 
 export default function GroupDetails() {
   const { groupId } = useParams();
@@ -41,6 +44,96 @@ export default function GroupDetails() {
   const [inviting, setInviting] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState('');
   const [inviteError, setInviteError] = useState('');
+
+  // Modals States
+  const [showEditGroup, setShowEditGroup] = useState(false);
+  const [showDeleteGroupConfirm, setShowDeleteGroupConfirm] = useState(false);
+
+  // Member modal state (null = closed, {} = add, member = edit)
+  const [memberModalData, setMemberModalData] = useState(null);
+  const [deletingMember, setDeletingMember] = useState(null);
+
+  // Expense modal state (null = closed, {} = add, expense = edit)
+  const [expenseModalData, setExpenseModalData] = useState(null);
+  const [deletingExpense, setDeletingExpense] = useState(null);
+
+  // Group Edit form state
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupDesc, setEditGroupDesc] = useState('');
+  const [editGroupSubmitting, setEditGroupSubmitting] = useState(false);
+  const [editGroupError, setEditGroupError] = useState('');
+
+  // Member form state
+  const [memberFormName, setMemberFormName] = useState('');
+  const [memberFormEmail, setMemberFormEmail] = useState('');
+  const [memberFormPhone, setMemberFormPhone] = useState('');
+  const [memberFormSubmitting, setMemberFormSubmitting] = useState(false);
+  const [memberFormErrors, setMemberFormErrors] = useState({});
+  const [memberFormError, setMemberFormError] = useState('');
+
+  // Expense form state
+  const [expenseFormTitle, setExpenseFormTitle] = useState('');
+  const [expenseFormAmount, setExpenseFormAmount] = useState('');
+  const [expenseFormPaidBy, setExpenseFormPaidBy] = useState('');
+  const [expenseFormDate, setExpenseFormDate] = useState('');
+  const [expenseFormCategory, setExpenseFormCategory] = useState('');
+  const [expenseFormDesc, setExpenseFormDesc] = useState('');
+  const [expenseFormNotes, setExpenseFormNotes] = useState('');
+  const [expenseFormSubmitting, setExpenseFormSubmitting] = useState(false);
+  const [expenseFormErrors, setExpenseFormErrors] = useState({});
+  const [expenseFormError, setExpenseFormError] = useState('');
+
+  // Pre-fill Edit Group form when opening
+  const openEditGroup = () => {
+    if (group) {
+      setEditGroupName(group.name);
+      setEditGroupDesc(group.description || '');
+      setEditGroupError('');
+      setShowEditGroup(true);
+    }
+  };
+
+  // Pre-fill Member Form when opening (Add or Edit)
+  const openMemberModal = (member = null) => {
+    setMemberFormError('');
+    setMemberFormErrors({});
+    if (member) {
+      setMemberModalData(member);
+      setMemberFormName(member.name);
+      setMemberFormEmail(member.email || '');
+      setMemberFormPhone(member.phone || '');
+    } else {
+      setMemberModalData({});
+      setMemberFormName('');
+      setMemberFormEmail('');
+      setMemberFormPhone('');
+    }
+  };
+
+  // Pre-fill Expense Form when opening (Add or Edit)
+  const openExpenseModal = (expense = null) => {
+    setExpenseFormError('');
+    setExpenseFormErrors({});
+    if (expense) {
+      setExpenseModalData(expense);
+      setExpenseFormTitle(expense.title);
+      setExpenseFormAmount(expense.amount);
+      setExpenseFormPaidBy(expense.paid_by);
+      setExpenseFormDate(expense.date);
+      setExpenseFormCategory(expense.category);
+      setExpenseFormDesc(expense.description || '');
+      setExpenseFormNotes(expense.notes || '');
+    } else {
+      setExpenseModalData({});
+      setExpenseFormTitle('');
+      setExpenseFormAmount('');
+      setExpenseFormPaidBy(members.length > 0 ? members[0].id : '');
+      setExpenseFormDate(new Date().toISOString().split('T')[0]);
+      setExpenseFormCategory('');
+      setExpenseFormDesc('');
+      setExpenseFormNotes('');
+    }
+  };
 
   const handleInviteUser = async (e) => {
     e.preventDefault();
@@ -89,33 +182,153 @@ export default function GroupDetails() {
     loadAllData();
   }, [groupId]);
 
-  const handleDeleteGroup = async () => {
-    if (!window.confirm('Are you sure you want to delete this group? This action is permanent.')) return;
+  const handleEditGroupSubmit = async (e) => {
+    e.preventDefault();
+    setEditGroupError('');
+    setEditGroupSubmitting(true);
+
+    if (editGroupName.trim().length < 3) {
+      setEditGroupError('Group name must be at least 3 characters long.');
+      setEditGroupSubmitting(false);
+      return;
+    }
+
+    try {
+      await updateGroup(groupId, { name: editGroupName.trim(), description: editGroupDesc.trim() });
+      setShowEditGroup(false);
+      loadAllData();
+    } catch (err) {
+      setEditGroupError(err.response?.data?.name?.[0] || err.response?.data?.detail || 'Failed to update group.');
+    } finally {
+      setEditGroupSubmitting(false);
+    }
+  };
+
+  const handleMemberSubmit = async (e) => {
+    e.preventDefault();
+    setMemberFormError('');
+    setMemberFormErrors({});
+    setMemberFormSubmitting(true);
+
+    if (memberFormName.trim().length < 2) {
+      setMemberFormErrors({ name: ['Member name must be at least 2 characters long.'] });
+      setMemberFormSubmitting(false);
+      return;
+    }
+
+    const payload = {
+      name: memberFormName.trim(),
+      email: memberFormEmail.trim(),
+      phone: memberFormPhone.trim()
+    };
+
+    const isEdit = !!memberModalData.id;
+
+    try {
+      if (isEdit) {
+        await updateMember(groupId, memberModalData.id, payload);
+      } else {
+        await addMember(groupId, payload);
+      }
+      setMemberModalData(null);
+      loadAllData();
+    } catch (err) {
+      if (err.response && err.response.data) {
+        if (err.response.data.name) {
+          setMemberFormErrors({ name: err.response.data.name });
+        } else {
+          setMemberFormError(err.response.data.non_field_errors?.[0] || err.response.data.detail || 'An error occurred.');
+        }
+      } else {
+        setMemberFormError('An unexpected error occurred.');
+      }
+    } finally {
+      setMemberFormSubmitting(false);
+    }
+  };
+
+  const handleExpenseSubmit = async (e) => {
+    e.preventDefault();
+    setExpenseFormError('');
+    setExpenseFormErrors({});
+    setExpenseFormSubmitting(true);
+
+    if (Number(expenseFormAmount) <= 0) {
+      setExpenseFormErrors({ amount: ['Expense amount must be greater than zero.'] });
+      setExpenseFormSubmitting(false);
+      return;
+    }
+
+    if (!expenseFormPaidBy) {
+      setExpenseFormError('Please select who paid for the expense.');
+      setExpenseFormSubmitting(false);
+      return;
+    }
+
+    const payload = {
+      title: expenseFormTitle.trim(),
+      amount: Number(expenseFormAmount),
+      paid_by: Number(expenseFormPaidBy),
+      date: expenseFormDate,
+      category: expenseFormCategory.trim() || 'General',
+      description: expenseFormDesc.trim() || null,
+      notes: expenseFormNotes.trim() || null
+    };
+
+    const isEdit = !!expenseModalData.id;
+
+    try {
+      if (isEdit) {
+        await updateExpense(groupId, expenseModalData.id, payload);
+        setExpenseModalData(null);
+        loadAllData();
+      } else {
+        const response = await createExpense(groupId, payload);
+        setExpenseModalData(null);
+        loadAllData();
+        navigate(`/groups/${groupId}/expenses/${response.data.id}/split`);
+      }
+    } catch (err) {
+      if (err.response && err.response.data) {
+        setExpenseFormErrors(err.response.data);
+      } else {
+        setExpenseFormError('An error occurred while saving the expense.');
+      }
+    } finally {
+      setExpenseFormSubmitting(false);
+    }
+  };
+
+  const handleConfirmDeleteGroup = async () => {
     try {
       await deleteGroup(groupId);
       navigate('/');
     } catch (err) {
       setError('Failed to delete group.');
+    } finally {
+      setShowDeleteGroupConfirm(false);
     }
   };
 
-  const handleDeleteMember = async (id, name) => {
-    if (!window.confirm(`Are you sure you want to remove member ${name}?`)) return;
+  const handleConfirmDeleteMember = async () => {
     try {
-      await deleteMember(groupId, id);
+      await deleteMember(groupId, deletingMember.id);
+      setDeletingMember(null);
       loadAllData();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to delete member.');
+      setDeletingMember(null);
     }
   };
 
-  const handleDeleteExpense = async (id, title) => {
-    if (!window.confirm(`Are you sure you want to delete expense "${title}"?`)) return;
+  const handleConfirmDeleteExpense = async () => {
     try {
-      await deleteExpense(groupId, id);
+      await deleteExpense(groupId, deletingExpense.id);
+      setDeletingExpense(null);
       loadAllData();
     } catch (err) {
       setError('Failed to delete expense.');
+      setDeletingExpense(null);
     }
   };
 
@@ -198,13 +411,22 @@ export default function GroupDetails() {
           </Link>
 
           {isCreator && (
-            <button
-              onClick={handleDeleteGroup}
-              className="p-2.5 rounded-xl border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition-colors"
-              title="Delete Group"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
+            <>
+              <button
+                onClick={openEditGroup}
+                className="p-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800/30 transition-colors flex items-center justify-center cursor-pointer"
+                title="Edit Group"
+              >
+                <Edit3 className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setShowDeleteGroupConfirm(true)}
+                className="p-2.5 rounded-xl border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                title="Delete Group"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -230,7 +452,7 @@ export default function GroupDetails() {
 
       {/* Primary Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* Left Column: Members & Budget */}
         <div className="space-y-8 lg:col-span-1">
           {/* Members Panel */}
@@ -241,13 +463,13 @@ export default function GroupDetails() {
                 <h3 className="text-lg font-bold text-white font-sans">Members</h3>
               </div>
               {isCreator && (
-                <Link
-                  to={`/groups/${groupId}/members/add`}
-                  className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/20 transition-all"
+                <button
+                  onClick={() => openMemberModal(null)}
+                  className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/20 transition-all cursor-pointer"
                   title="Add Member"
                 >
                   <Plus className="w-4 h-4" />
-                </Link>
+                </button>
               )}
             </div>
 
@@ -277,16 +499,16 @@ export default function GroupDetails() {
 
                       {isCreator && (
                         <>
-                          <Link
-                            to={`/groups/${groupId}/members/${member.id}/edit`}
-                            className="p-1 text-slate-500 hover:text-slate-300 transition-colors opacity-0 group-hover:opacity-100"
+                          <button
+                            onClick={() => openMemberModal(member)}
+                            className="p-1 text-slate-500 hover:text-slate-300 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
                             title="Edit Member"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
-                          </Link>
+                          </button>
                           <button
-                            onClick={() => handleDeleteMember(member.id, member.name)}
-                            className="p-1 text-rose-500/70 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
+                            onClick={() => setDeletingMember(member)}
+                            className="p-1 text-rose-500/70 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
                             title="Remove Member"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -342,7 +564,7 @@ export default function GroupDetails() {
                   <span>{budgetProgress.toFixed(0)}%</span>
                 </div>
                 <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div 
+                  <div
                     className={`h-2 rounded-full transition-all duration-500 ${isBudgetExceeded ? 'bg-rose-500' : 'bg-indigo-500'}`}
                     style={{ width: `${budgetProgress}%` }}
                   ></div>
@@ -390,13 +612,13 @@ export default function GroupDetails() {
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-xl font-bold text-white font-sans">Expenses History</h2>
             {isCreator && (
-              <Link
-                to={`/groups/${groupId}/expenses/add`}
-                className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-400 hover:text-indigo-300 font-semibold text-xs rounded-xl transition-all"
+              <button
+                onClick={() => openExpenseModal(null)}
+                className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-400 hover:text-indigo-300 font-semibold text-xs rounded-xl transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add Expense</span>
-              </Link>
+              </button>
             )}
           </div>
 
@@ -414,7 +636,7 @@ export default function GroupDetails() {
                 const isExpanded = expandedExpenseId === expense.id;
                 return (
                   <div key={expense.id} className="glass-panel rounded-2xl overflow-hidden transition-all duration-300">
-                    <div 
+                    <div
                       onClick={() => toggleExpenseExpansion(expense.id)}
                       className="p-5 flex justify-between items-center cursor-pointer hover:bg-slate-800/10 transition-colors"
                     >
@@ -500,16 +722,16 @@ export default function GroupDetails() {
                         {/* Creator options */}
                         {isCreator && (
                           <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800/40 text-xs">
-                            <Link
-                              to={`/groups/${groupId}/expenses/${expense.id}/edit`}
-                              className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-300 hover:bg-slate-800/30 transition-all"
+                            <button
+                              onClick={() => openExpenseModal(expense)}
+                              className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-300 hover:bg-slate-800/30 transition-all cursor-pointer"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                               <span>Edit</span>
-                            </Link>
+                            </button>
                             <button
-                              onClick={() => handleDeleteExpense(expense.id, expense.title)}
-                              className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition-all"
+                              onClick={() => setDeletingExpense(expense)}
+                              className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>Delete</span>
@@ -525,6 +747,450 @@ export default function GroupDetails() {
           )}
         </div>
       </div>
+
+      {/* ================= MODALS ================= */}
+
+      {/* 1. Group Edit Modal */}
+      {showEditGroup && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-panel w-full max-w-md rounded-2xl p-6 space-y-6">
+            <div className="flex justify-between items-center border-b border-slate-800/40 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <Settings className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white font-sans">Edit Group Details</h3>
+              </div>
+              <button
+                onClick={() => setShowEditGroup(false)}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {editGroupError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{editGroupError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleEditGroupSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="modalGroupName" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                  Group Name
+                </label>
+                <input
+                  id="modalGroupName"
+                  type="text"
+                  required
+                  value={editGroupName}
+                  onChange={(e) => setEditGroupName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans text-white animate-all"
+                  placeholder="Group Name"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="modalGroupDesc" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                  Description
+                </label>
+                <textarea
+                  id="modalGroupDesc"
+                  rows={3}
+                  value={editGroupDesc}
+                  onChange={(e) => setEditGroupDesc(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans text-white animate-all"
+                  placeholder="Optional description"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditGroup(false)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editGroupSubmitting}
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                >
+                  {editGroupSubmitting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <span>Save Changes</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Group Delete Confirm Modal */}
+      {showDeleteGroupConfirm && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-panel w-full max-w-md rounded-2xl p-6 space-y-6">
+            <div>
+              <h3 className="text-xl font-bold text-white font-sans flex items-center space-x-2">
+                <AlertTriangle className="w-6 h-6 text-rose-400" />
+                <span>Delete Group</span>
+              </h3>
+              <p className="text-slate-400 text-sm mt-3">
+                Are you sure you want to delete the group <strong className="text-white">"{group.name}"</strong>? This action is permanent and will delete all expenses, members, and split records.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteGroupConfirm(false)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDeleteGroup}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center"
+              >
+                Delete Group
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Member Modal (Add / Edit) */}
+      {memberModalData && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-panel w-full max-w-md rounded-2xl p-6 space-y-6">
+            <div className="flex justify-between items-center border-b border-slate-800/40 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <Users className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white font-sans">
+                  {memberModalData.id ? 'Edit Member Details' : 'Add Group Member'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setMemberModalData(null)}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {memberFormError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{memberFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleMemberSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="modalMemberName" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                  Member Name
+                </label>
+                <input
+                  id="modalMemberName"
+                  type="text"
+                  required
+                  value={memberFormName}
+                  onChange={(e) => setMemberFormName(e.target.value)}
+                  className={`w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white ${memberFormErrors.name ? 'border-rose-500/50' : ''}`}
+                  placeholder="e.g. John Doe"
+                />
+                {memberFormErrors.name && (
+                  <p className="mt-1 text-[10px] text-rose-400">{memberFormErrors.name[0]}</p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="modalMemberEmail" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                  Email Address (Optional)
+                </label>
+                <input
+                  id="modalMemberEmail"
+                  type="email"
+                  value={memberFormEmail}
+                  onChange={(e) => setMemberFormEmail(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white"
+                  placeholder="john@example.com"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="modalMemberPhone" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                  Phone Number (Optional)
+                </label>
+                <input
+                  id="modalMemberPhone"
+                  type="text"
+                  value={memberFormPhone}
+                  onChange={(e) => setMemberFormPhone(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white"
+                  placeholder="e.g. +91 98765 43210"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMemberModalData(null)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={memberFormSubmitting}
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                >
+                  {memberFormSubmitting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <span>{memberModalData.id ? 'Save Changes' : 'Add Member'}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Member Delete Confirm Modal */}
+      {deletingMember && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-panel w-full max-w-md rounded-2xl p-6 space-y-6">
+            <div>
+              <h3 className="text-xl font-bold text-white font-sans flex items-center space-x-2">
+                <AlertTriangle className="w-6 h-6 text-rose-400" />
+                <span>Remove Member</span>
+              </h3>
+              <p className="text-slate-400 text-sm mt-3">
+                Are you sure you want to remove member <strong className="text-white">"{deletingMember.name}"</strong>? All balances and splits associated with this member will remain, but they will be detached from the group members list.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeletingMember(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDeleteMember}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Expense Modal (Add / Edit) */}
+      {expenseModalData && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="glass-panel w-full max-w-lg rounded-2xl p-6 my-8 mx-auto space-y-6 relative">
+            <div className="flex justify-between items-center border-b border-slate-800/40 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <MoneyIcon className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white font-sans">
+                  {expenseModalData.id ? 'Edit Expense Record' : 'Record New Expense'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setExpenseModalData(null)}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {expenseFormError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{expenseFormError}</span>
+              </div>
+            )}
+
+            {members.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs">
+                Please add members to this group before recording expenses.
+              </div>
+            ) : (
+              <form onSubmit={handleExpenseSubmit} className="space-y-4">
+                <div>
+                  <label htmlFor="modalExpTitle" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                    Title / Bill Name
+                  </label>
+                  <input
+                    id="modalExpTitle"
+                    type="text"
+                    required
+                    value={expenseFormTitle}
+                    onChange={(e) => setExpenseFormTitle(e.target.value)}
+                    className={`w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white ${expenseFormErrors.title ? 'border-rose-500/50' : ''}`}
+                    placeholder="e.g. Dinner or Cab Fare"
+                  />
+                  {expenseFormErrors.title && (
+                    <p className="mt-1 text-[10px] text-rose-400">{expenseFormErrors.title[0]}</p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="modalExpAmount" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                      Amount (₹)
+                    </label>
+                    <input
+                      id="modalExpAmount"
+                      type="number"
+                      required
+                      step="0.01"
+                      min="0.01"
+                      value={expenseFormAmount}
+                      onChange={(e) => setExpenseFormAmount(e.target.value)}
+                      className={`w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white ${expenseFormErrors.amount ? 'border-rose-500/50' : ''}`}
+                      placeholder="0.00"
+                    />
+                    {expenseFormErrors.amount && (
+                      <p className="mt-1 text-[10px] text-rose-400">{expenseFormErrors.amount[0]}</p>
+                    )}
+                  </div>
+
+                  <Dropdown
+                    id="modalExpPaidBy"
+                    label="Paid By"
+                    required
+                    size="sm"
+                    value={expenseFormPaidBy}
+                    onChange={(e) => setExpenseFormPaidBy(e.target.value)}
+                    options={members.map(m => ({ value: m.id, label: m.name, sublabel: m.email }))}
+                    placeholder="Select payer"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="modalExpDate" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                      Date
+                    </label>
+                    <input
+                      id="modalExpDate"
+                      type="date"
+                      required
+                      value={expenseFormDate}
+                      onChange={(e) => setExpenseFormDate(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="modalExpCategory" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                      Category
+                    </label>
+                    <input
+                      id="modalExpCategory"
+                      type="text"
+                      required
+                      value={expenseFormCategory}
+                      onChange={(e) => setExpenseFormCategory(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white"
+                      placeholder="e.g. Food, Cab, Rent"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="modalExpDesc" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                    Description
+                  </label>
+                  <textarea
+                    id="modalExpDesc"
+                    rows={2}
+                    value={expenseFormDesc}
+                    onChange={(e) => setExpenseFormDesc(e.target.value)}
+                    className="w-full px-4 py-2 rounded-xl glass-input text-xs font-sans text-white"
+                    placeholder="Brief description (Optional)"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="modalExpNotes" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                    Notes
+                  </label>
+                  <textarea
+                    id="modalExpNotes"
+                    rows={2}
+                    value={expenseFormNotes}
+                    onChange={(e) => setExpenseFormNotes(e.target.value)}
+                    className="w-full px-4 py-2 rounded-xl glass-input text-xs font-sans text-white"
+                    placeholder="Special remarks (Optional)"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpenseModalData(null)}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={expenseFormSubmitting}
+                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                  >
+                    {expenseFormSubmitting ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <span>{expenseModalData.id ? 'Save Changes' : 'Record Expense'}</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 6. Expense Delete Confirm Modal */}
+      {deletingExpense && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-panel w-full max-w-md rounded-2xl p-6 space-y-6">
+            <div>
+              <h3 className="text-xl font-bold text-white font-sans flex items-center space-x-2">
+                <AlertTriangle className="w-6 h-6 text-rose-400" />
+                <span>Delete Expense</span>
+              </h3>
+              <p className="text-slate-400 text-sm mt-3">
+                Are you sure you want to delete the expense <strong className="text-white">"{deletingExpense.title}"</strong>? This will remove all split allocations associated with this bill.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeletingExpense(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDeleteExpense}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

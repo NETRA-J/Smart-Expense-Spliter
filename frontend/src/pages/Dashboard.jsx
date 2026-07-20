@@ -17,6 +17,7 @@ export default function Dashboard() {
   const [groupDesc, setGroupDesc] = useState('');
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const fetchGroups = async () => {
     try {
@@ -77,6 +78,7 @@ export default function Dashboard() {
       await createGroup({ name: groupName, description: groupDesc });
       setGroupName('');
       setGroupDesc('');
+      setIsCreateModalOpen(false);
       fetchGroups();
     } catch (err) {
       setCreateError(err.response?.data?.name?.[0] || 'Error creating group.');
@@ -95,7 +97,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 border-b border-slate-800/20 pb-4">
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight font-sans text-white">
             Dashboard
@@ -104,6 +106,13 @@ export default function Dashboard() {
             Welcome back, <span className="text-indigo-400 font-semibold">{user?.username}</span>! Here are your active groups.
           </p>
         </div>
+        <button
+          onClick={() => setIsCreateModalOpen(true)}
+          className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/10 hover:shadow-indigo-500/20 cursor-pointer"
+        >
+          <PlusCircle className="w-4.5 h-4.5" />
+          <span>New Group</span>
+        </button>
       </div>
 
       {/* Pending Invitations Panel */}
@@ -167,121 +176,146 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Create Group Form Panel */}
-        <div className="glass-panel rounded-2xl p-6 h-fit lg:col-span-1">
-          <div className="flex items-center space-x-2.5 mb-6">
-            <FolderPlus className="w-6 h-6 text-indigo-400" />
-            <h2 className="text-xl font-bold text-white font-sans">Create New Group</h2>
+      <div className="space-y-4">
+        <h2 className="text-xl font-bold text-white font-sans mb-4">Your Expense Groups</h2>
+        
+        {groups.length === 0 ? (
+          <div className="glass-panel rounded-2xl p-12 text-center">
+            <Users className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-slate-300">No Groups Found</h3>
+            <p className="text-slate-500 text-sm mt-1 max-w-sm mx-auto">
+              You are not part of any expense splitting groups yet. Click the 'New Group' button above to start!
+            </p>
           </div>
-
-          {createError && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start space-x-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{createError}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleCreateGroup} className="space-y-4">
-            <div>
-              <label htmlFor="groupName" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
-                Group Name
-              </label>
-              <input
-                id="groupName"
-                type="text"
-                required
-                value={groupName}
-                onChange={(e) => setGroupName(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans"
-                placeholder="e.g. Goa Trip 2026"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="groupDesc" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
-                Description
-              </label>
-              <textarea
-                id="groupDesc"
-                rows={3}
-                value={groupDesc}
-                onChange={(e) => setGroupDesc(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans"
-                placeholder="Optional description"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={creating}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-xl text-sm font-semibold transition-all flex items-center justify-center space-x-2"
-            >
-              {creating ? (
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                <>
-                  <PlusCircle className="w-4 h-4" />
-                  <span>Create Group</span>
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-
-        {/* Groups Listing Panel */}
-        <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-xl font-bold text-white font-sans mb-4">Your Expense Groups</h2>
-          
-          {groups.length === 0 ? (
-            <div className="glass-panel rounded-2xl p-12 text-center">
-              <Users className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-slate-300">No Groups Found</h3>
-              <p className="text-slate-500 text-sm mt-1 max-w-sm mx-auto">
-                You are not part of any expense splitting groups yet. Create a group on the left to start!
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {groups.map((group) => (
-                <div key={group.id} className="glass-panel glass-panel-hover rounded-2xl p-6 flex flex-col justify-between h-48">
-                  <div>
-                    <div className="flex justify-between items-start">
-                      <h3 className="font-bold text-lg font-sans text-white hover:text-indigo-400 transition-colors line-clamp-1">
-                        <Link to={`/groups/${group.id}`}>{group.name}</Link>
-                      </h3>
-                      {group.created_by.id === user.id ? (
-                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                          Creator
-                        </span>
-                      ) : (
-                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/30">
-                          Member
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-slate-400 text-xs mt-2 line-clamp-2">{group.description || 'No description provided.'}</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {groups.map((group) => (
+              <div key={group.id} className="glass-panel glass-panel-hover rounded-2xl p-6 flex flex-col justify-between h-48">
+                <div>
+                  <div className="flex justify-between items-start">
+                    <h3 className="font-bold text-lg font-sans text-white hover:text-indigo-400 transition-colors line-clamp-1">
+                      <Link to={`/groups/${group.id}`}>{group.name}</Link>
+                    </h3>
+                    {group.created_by.id === user.id ? (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                        Creator
+                      </span>
+                    ) : (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/30">
+                        Member
+                      </span>
+                    )}
                   </div>
-                  
-                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-800/40 text-slate-500 text-[11px]">
-                    <div className="flex items-center space-x-1.5">
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{new Date(group.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <Link
-                      to={`/groups/${group.id}`}
-                      className="flex items-center space-x-1 font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
-                    >
-                      <span>Details</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </Link>
-                  </div>
+                  <p className="text-slate-400 text-xs mt-2 line-clamp-2">{group.description || 'No description provided.'}</p>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+                
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-800/40 text-slate-500 text-[11px]">
+                  <div className="flex items-center space-x-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>{new Date(group.created_at).toLocaleDateString()}</span>
+                  </div>
+                  <Link
+                    to={`/groups/${group.id}`}
+                    className="flex items-center space-x-1 font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                  >
+                    <span>Details</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Create Group Popup Modal */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-panel w-full max-w-md rounded-2xl p-6 space-y-6">
+            <div className="flex justify-between items-center border-b border-slate-800/40 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <FolderPlus className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white font-sans">Create New Group</h3>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsCreateModalOpen(false);
+                  setGroupName('');
+                  setGroupDesc('');
+                  setCreateError('');
+                }}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {createError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{createError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateGroup} className="space-y-4">
+              <div>
+                <label htmlFor="groupName" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                  Group Name
+                </label>
+                <input
+                  id="groupName"
+                  type="text"
+                  required
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans"
+                  placeholder="e.g. Goa Trip 2026"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="groupDesc" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                  Description
+                </label>
+                <textarea
+                  id="groupDesc"
+                  rows={3}
+                  value={groupDesc}
+                  onChange={(e) => setGroupDesc(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans"
+                  placeholder="Optional description"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreateModalOpen(false);
+                    setGroupName('');
+                    setGroupDesc('');
+                    setCreateError('');
+                  }}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer animate-all"
+                >
+                  {creating ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <span>Create Group</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

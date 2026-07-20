@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { createExpense, updateExpense, getExpenseDetail, getMembers } from '../services/api';
 import { ArrowLeft, CreditCard, AlertCircle } from 'lucide-react';
+import Dropdown from '../components/Dropdown';
 
 export default function ExpenseForm() {
   const { groupId, expenseId } = useParams();
@@ -173,27 +174,16 @@ export default function ExpenseForm() {
                 )}
               </div>
 
-              <div>
-                <label htmlFor="expPaidBy" className="block text-slate-300 text-sm font-medium mb-1.5">
-                  Paid By
-                </label>
-                <select
-                  id="expPaidBy"
-                  required
-                  value={paidBy}
-                  onChange={(e) => setPaidBy(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans"
-                >
-                  {members.map(m => (
-                    <option key={m.id} value={m.id} className="bg-slate-900 text-white">
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                {errors.paid_by && (
-                  <p className="mt-1 text-xs text-rose-400">{errors.paid_by[0]}</p>
-                )}
-              </div>
+              <Dropdown
+                id="expPaidBy"
+                label="Paid By"
+                required
+                value={paidBy}
+                onChange={(e) => setPaidBy(e.target.value)}
+                options={members.map(m => ({ value: m.id, label: m.name, sublabel: m.email }))}
+                error={errors.paid_by ? errors.paid_by[0] : ''}
+                placeholder="Select payer"
+              />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
