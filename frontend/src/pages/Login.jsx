@@ -1,5 +1,5 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { Wallet, LogIn, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
@@ -11,10 +11,14 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const { login, token } = useContext(AuthContext);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const searchParams = new URLSearchParams(location.search);
+  const redirectUrl = searchParams.get('redirect') || '/';
 
   useEffect(() => {
-    if (token) navigate('/');
-  }, [token, navigate]);
+    if (token) navigate(redirectUrl);
+  }, [token, navigate, redirectUrl]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,7 +27,7 @@ export default function Login() {
 
     const result = await login(username, password);
     if (result.success) {
-      navigate('/');
+      navigate(redirectUrl);
     } else {
       setError(result.error);
       setSubmitting(false);
@@ -111,7 +115,7 @@ export default function Login() {
 
           <div className="mt-8 pt-6 border-t border-slate-800 text-center text-sm">
             <span className="text-slate-400">Don't have an account? </span>
-            <Link to="/register" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+            <Link to={`/register${location.search}`} className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
               Sign Up
             </Link>
           </div>

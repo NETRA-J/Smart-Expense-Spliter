@@ -15,3 +15,21 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Environment variables
+.env
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+env/
+
+# Local database
+*.sqlite3
+
+# Build files
+node_modules/
+dist/
+build/

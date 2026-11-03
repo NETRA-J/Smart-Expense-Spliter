@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { createExpense, updateExpense, getExpenseDetail, getMembers } from '../services/api';
 import { ArrowLeft, CreditCard, AlertCircle } from 'lucide-react';
-import Dropdown from '../components/Dropdown';
 
 export default function ExpenseForm() {
   const { groupId, expenseId } = useParams();
@@ -12,7 +11,6 @@ export default function ExpenseForm() {
   // Form Fields
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [paidBy, setPaidBy] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
@@ -32,16 +30,12 @@ export default function ExpenseForm() {
       try {
         const membersRes = await getMembers(groupId);
         setMembers(membersRes.data);
-        if (membersRes.data.length > 0 && !isEdit) {
-          setPaidBy(membersRes.data[0].id);
-        }
 
         if (isEdit) {
           const expenseRes = await getExpenseDetail(groupId, expenseId);
           const exp = expenseRes.data;
           setTitle(exp.title);
           setAmount(exp.amount);
-          setPaidBy(exp.paid_by);
           setDate(exp.date);
           setCategory(exp.category);
           setDescription(exp.description || '');
@@ -71,7 +65,6 @@ export default function ExpenseForm() {
     const payload = {
       title: title.trim(),
       amount: Number(amount),
-      paid_by: Number(paidBy),
       date,
       category: category.trim() || 'General',
       description: description.trim() || null,
@@ -153,37 +146,24 @@ export default function ExpenseForm() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="expAmount" className="block text-slate-300 text-sm font-medium mb-1.5">
-                  Amount (₹)
-                </label>
-                <input
-                  id="expAmount"
-                  type="number"
-                  required
-                  step="0.01"
-                  min="0.01"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className={`w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans ${errors.amount ? 'border-rose-500/50 focus:border-rose-500' : ''}`}
-                  placeholder="0.00"
-                />
-                {errors.amount && (
-                  <p className="mt-1 text-xs text-rose-400">{errors.amount[0]}</p>
-                )}
-              </div>
-
-              <Dropdown
-                id="expPaidBy"
-                label="Paid By"
+            <div>
+              <label htmlFor="expAmount" className="block text-slate-300 text-sm font-medium mb-1.5">
+                Amount (₹)
+              </label>
+              <input
+                id="expAmount"
+                type="number"
                 required
-                value={paidBy}
-                onChange={(e) => setPaidBy(e.target.value)}
-                options={members.map(m => ({ value: m.id, label: m.name, sublabel: m.email }))}
-                error={errors.paid_by ? errors.paid_by[0] : ''}
-                placeholder="Select payer"
+                step="0.01"
+                min="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className={`w-full px-4 py-2.5 rounded-xl glass-input text-sm font-sans ${errors.amount ? 'border-rose-500/50 focus:border-rose-500' : ''}`}
+                placeholder="0.00"
               />
+              {errors.amount && (
+                <p className="mt-1 text-xs text-rose-400">{errors.amount[0]}</p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -1,11 +1,16 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { Wallet, UserPlus, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 export default function Register() {
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const redirectUrl = searchParams.get('redirect') || '/';
+  const initialEmail = searchParams.get('email') || '';
+
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -16,8 +21,8 @@ export default function Register() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (token) navigate('/');
-  }, [token, navigate]);
+    if (token) navigate(redirectUrl);
+  }, [token, navigate, redirectUrl]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,7 +37,7 @@ export default function Register() {
 
     const result = await register(username, email, password, confirmPassword);
     if (result.success) {
-      navigate('/');
+      navigate(redirectUrl);
     } else {
       setErrors(result.errors);
       setSubmitting(false);
@@ -171,7 +176,7 @@ export default function Register() {
 
           <div className="mt-8 pt-6 border-t border-slate-800 text-center text-sm">
             <span className="text-slate-400">Already have an account? </span>
-            <Link to="/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+            <Link to={`/login${location.search}`} className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
               Sign In
             </Link>
           </div>

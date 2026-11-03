@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getGroupDetail, deleteGroup, getMembers, deleteMember,
-  getExpenses, deleteExpense, getGroupBudget, setGroupBudget, inviteMember,
+  getExpenses, deleteExpense, getGroupBudget, setGroupBudget, inviteMember, getGroupInvitations,
   updateGroup, addMember, updateMember, createExpense, updateExpense
 } from '../services/api';
 import { AuthContext } from '../context/AuthContext';
@@ -10,7 +10,7 @@ import {
   Users, DollarSign, Settings, Trash2, Edit3, Plus,
   ChevronRight, Calendar, AlertTriangle, ArrowLeft,
   ChevronDown, ChevronUp, Bell, DollarSign as MoneyIcon,
-  X, RefreshCw, AlertCircle
+  X, RefreshCw, AlertCircle, Copy, Link2, Send, CheckCircle2
 } from 'lucide-react';
 import Dropdown from '../components/Dropdown';
 
@@ -19,7 +19,7 @@ export default function GroupDetails() {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
 
-  // Group Details state
+  // Group Details state 
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -38,12 +38,15 @@ export default function GroupDetails() {
 
   // Active view states
   const [isCreator, setIsCreator] = useState(false);
+  const isOwner = isCreator;
 
   // Invitation states
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState('');
   const [inviteError, setInviteError] = useState('');
+  const [groupInvitations, setGroupInvitations] = useState([]);
+  const [copiedInviteId, setCopiedInviteId] = useState(null);
 
   // Modals States
   const [showEditGroup, setShowEditGroup] = useState(false);
@@ -52,6 +55,7 @@ export default function GroupDetails() {
   // Member modal state (null = closed, {} = add, member = edit)
   const [memberModalData, setMemberModalData] = useState(null);
   const [deletingMember, setDeletingMember] = useState(null);
+  const isEditingOwner = memberModalData && (memberModalData.user?.id === group?.created_by?.id || memberModalData.name === group?.created_by?.username);
 
   // Expense modal state (null = closed, {} = add, expense = edit)
   const [expenseModalData, setExpenseModalData] = useState(null);
@@ -70,11 +74,13 @@ export default function GroupDetails() {
   const [memberFormSubmitting, setMemberFormSubmitting] = useState(false);
   const [memberFormErrors, setMemberFormErrors] = useState({});
   const [memberFormError, setMemberFormError] = useState('');
+  const [memberFormCanAddExpense, setMemberFormCanAddExpense] = useState(true);
+  const [memberFormCanEditExpense, setMemberFormCanEditExpense] = useState(false);
+  const [memberFormCanDeleteExpense, setMemberFormCanDeleteExpense] = useState(false);
 
   // Expense form state
   const [expenseFormTitle, setExpenseFormTitle] = useState('');
   const [expenseFormAmount, setExpenseFormAmount] = useState('');
-  const [expenseFormPaidBy, setExpenseFormPaidBy] = useState('');
   const [expenseFormDate, setExpenseFormDate] = useState('');
   const [expenseFormCategory, setExpenseFormCategory] = useState('');
   const [expenseFormDesc, setExpenseFormDesc] = useState('');
@@ -102,11 +108,17 @@ export default function GroupDetails() {
       setMemberFormName(member.name);
       setMemberFormEmail(member.email || '');
       setMemberFormPhone(member.phone || '');
+      setMemberFormCanAddExpense(member.can_add_expense !== undefined ? member.can_add_expense : true);
+      setMemberFormCanEditExpense(member.can_edit_expense !== undefined ? member.can_edit_expense : false);
+      setMemberFormCanDeleteExpense(member.can_delete_expense !== undefined ? member.can_delete_expense : false);
     } else {
       setMemberModalData({});
       setMemberFormName('');
       setMemberFormEmail('');
       setMemberFormPhone('');
+      setMemberFormCanAddExpense(true);
+      setMemberFormCanEditExpense(false);
+      setMemberFormCanDeleteExpense(false);
     }
   };
 
@@ -118,7 +130,6 @@ export default function GroupDetails() {
       setExpenseModalData(expense);
       setExpenseFormTitle(expense.title);
       setExpenseFormAmount(expense.amount);
-      setExpenseFormPaidBy(expense.paid_by);
       setExpenseFormDate(expense.date);
       setExpenseFormCategory(expense.category);
       setExpenseFormDesc(expense.description || '');
@@ -127,7 +138,6 @@ export default function GroupDetails() {
       setExpenseModalData({});
       setExpenseFormTitle('');
       setExpenseFormAmount('');
-      setExpenseFormPaidBy(members.length > 0 ? members[0].id : '');
       setExpenseFormDate(new Date().toISOString().split('T')[0]);
       setExpenseFormCategory('');
       setExpenseFormDesc('');
@@ -142,14 +152,23 @@ export default function GroupDetails() {
     if (!inviteEmail.trim()) return;
     setInviting(true);
     try {
-      await inviteMember(groupId, { email: inviteEmail.trim() });
-      setInviteSuccess('Invitation sent successfully!');
+      const res = await inviteMember(groupId, { email: inviteEmail.trim() });
+      setInviteSuccess(`Invitation email dispatched to ${inviteEmail.trim()}! You can also copy the link below.`);
       setInviteEmail('');
+      const invRes = await getGroupInvitations(groupId);
+      setGroupInvitations(invRes.data);
     } catch (err) {
       setInviteError(err.response?.data?.email?.[0] || err.response?.data?.detail || 'Failed to send invitation.');
     } finally {
       setInviting(false);
     }
+  };
+
+  const handleCopyLink = (invitationId) => {
+    const inviteUrl = `${window.location.origin}/invitations/${invitationId}`;
+    navigator.clipboard.writeText(inviteUrl);
+    setCopiedInviteId(invitationId);
+    setTimeout(() => setCopiedInviteId(null), 2000);
   };
 
   const loadAllData = async () => {
@@ -171,14 +190,25 @@ export default function GroupDetails() {
       if (budgetRes.data.budget) {
         setNewBudgetLimit(budgetRes.data.budget.amount_limit);
       }
+
+      try {
+        const invRes = await getGroupInvitations(groupId);
+        setGroupInvitations(invRes.data);
+      } catch (err) {
+        console.error('Failed to load group invitations:', err);
+      }
     } catch (err) {
       setError('Failed to fetch group details.');
+      setGroup(null);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    setGroup(null);
+    setLoading(true);
+    setError('');
     loadAllData();
   }, [groupId]);
 
@@ -219,7 +249,10 @@ export default function GroupDetails() {
     const payload = {
       name: memberFormName.trim(),
       email: memberFormEmail.trim(),
-      phone: memberFormPhone.trim()
+      phone: memberFormPhone.trim(),
+      can_add_expense: memberFormCanAddExpense,
+      can_edit_expense: memberFormCanEditExpense,
+      can_delete_expense: memberFormCanDeleteExpense
     };
 
     const isEdit = !!memberModalData.id;
@@ -237,7 +270,7 @@ export default function GroupDetails() {
         if (err.response.data.name) {
           setMemberFormErrors({ name: err.response.data.name });
         } else {
-          setMemberFormError(err.response.data.non_field_errors?.[0] || err.response.data.detail || 'An error occurred.');
+          setMemberFormError(err.response.data.non_field_errors?.[0] || err.response.data.detail || 'A user with this email already exists');
         }
       } else {
         setMemberFormError('An unexpected error occurred.');
@@ -259,16 +292,9 @@ export default function GroupDetails() {
       return;
     }
 
-    if (!expenseFormPaidBy) {
-      setExpenseFormError('Please select who paid for the expense.');
-      setExpenseFormSubmitting(false);
-      return;
-    }
-
     const payload = {
       title: expenseFormTitle.trim(),
       amount: Number(expenseFormAmount),
-      paid_by: Number(expenseFormPaidBy),
       date: expenseFormDate,
       category: expenseFormCategory.trim() || 'General',
       description: expenseFormDesc.trim() || null,
@@ -462,43 +488,43 @@ export default function GroupDetails() {
                 <Users className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-lg font-bold text-white font-sans">Members</h3>
               </div>
-              {isCreator && (
-                <button
-                  onClick={() => openMemberModal(null)}
-                  className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/20 transition-all cursor-pointer"
-                  title="Add Member"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              )}
             </div>
 
             {members.length === 0 ? (
               <p className="text-slate-500 text-sm text-center py-6">No members added yet.</p>
             ) : (
               <div className="divide-y divide-slate-800/40">
-                {members.map((member) => (
-                  <div key={member.id} className="py-3 flex justify-between items-center group">
-                    <div>
-                      <Link
-                        to={`/groups/${groupId}/members/${member.id}/ledger`}
-                        className="font-medium text-slate-200 hover:text-indigo-400 transition-colors text-sm"
-                      >
-                        {member.name}
-                      </Link>
-                      <p className="text-[11px] text-slate-500">{member.email || 'No email'}</p>
-                    </div>
+                {members.map((member) => {
+                  const isSelf = member.user?.id === user?.id || (member.email && user?.email && member.email.toLowerCase() === user.email.toLowerCase());
+                  const isOwnerMember = member.user?.id === group?.created_by?.id || member.name === group?.created_by?.username;
+                  return (
+                    <div key={member.id} className="py-3 flex justify-between items-center group">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <Link
+                            to={`/groups/${groupId}/members/${member.id}/ledger`}
+                            className="font-medium text-slate-200 hover:text-indigo-400 transition-colors text-sm"
+                          >
+                            {member.name}
+                          </Link>
+                          {isOwnerMember && (
+                            <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                              Owner
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500">{member.email || 'No email'}</p>
+                      </div>
 
-                    <div className="flex items-center space-x-1.5">
-                      <Link
-                        to={`/groups/${groupId}/members/${member.id}/ledger`}
-                        className="text-[11px] font-semibold text-indigo-400 hover:underline px-2 py-1 rounded"
-                      >
-                        Ledger
-                      </Link>
+                      <div className="flex items-center space-x-1.5">
+                        <Link
+                          to={`/groups/${groupId}/members/${member.id}/ledger`}
+                          className="text-[11px] font-semibold text-indigo-400 hover:underline px-2 py-1 rounded"
+                        >
+                          Ledger
+                        </Link>
 
-                      {isCreator && (
-                        <>
+                        {(isCreator || isSelf) && (
                           <button
                             onClick={() => openMemberModal(member)}
                             className="p-1 text-slate-500 hover:text-slate-300 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
@@ -506,6 +532,8 @@ export default function GroupDetails() {
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
+                        )}
+                        {isCreator && !isOwnerMember && (
                           <button
                             onClick={() => setDeletingMember(member)}
                             className="p-1 text-rose-500/70 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
@@ -513,105 +541,157 @@ export default function GroupDetails() {
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        </>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
             {isCreator && (
-              <form onSubmit={handleInviteUser} className="mt-4 pt-4 border-t border-slate-800/40 space-y-2">
-                <label htmlFor="inviteEmail" className="block text-slate-400 text-[10px] font-semibold uppercase tracking-wider">
-                  Invite Member by Email
-                </label>
-                {inviteSuccess && <p className="text-emerald-400 text-xs">{inviteSuccess}</p>}
-                {inviteError && <p className="text-rose-400 text-xs">{inviteError}</p>}
-                <div className="flex items-center space-x-2">
-                  <input
-                    id="inviteEmail"
-                    type="email"
-                    required
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    className="flex-1 px-3 py-1.5 rounded-lg glass-input text-xs"
-                    placeholder="friend@example.com"
-                  />
-                  <button
-                    type="submit"
-                    disabled={inviting}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-lg text-xs font-semibold cursor-pointer"
-                  >
-                    {inviting ? '...' : 'Invite'}
-                  </button>
-                </div>
-              </form>
+              <div className="mt-4 pt-4 border-t border-slate-800/40 space-y-3">
+                <form onSubmit={handleInviteUser} className="space-y-2">
+                  <label htmlFor="inviteEmail" className="block text-slate-400 text-[10px] font-semibold uppercase tracking-wider">
+                    Invite Member by Email
+                  </label>
+                  {inviteSuccess && <p className="text-emerald-400 text-xs font-medium">{inviteSuccess}</p>}
+                  {inviteError && <p className="text-rose-400 text-xs">{inviteError}</p>}
+                  <div className="flex items-center space-x-2">
+                    <input
+                      id="inviteEmail"
+                      type="email"
+                      required
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      className="flex-1 px-3 py-1.5 rounded-lg glass-input text-xs"
+                      placeholder="friend@example.com"
+                    />
+                    <button
+                      type="submit"
+                      disabled={inviting}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-lg text-xs font-semibold flex items-center space-x-1 cursor-pointer transition-colors"
+                    >
+                      <Send className="w-3 h-3" />
+                      <span>{inviting ? '...' : 'Invite'}</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* Sent Invitations & Copy Link List */}
+                {groupInvitations.length > 0 && (
+                  <div className="mt-3 space-y-1.5 pt-3 border-t border-slate-800/30">
+                    <p className="text-slate-400 text-[10px] font-semibold uppercase tracking-wider mb-2">
+                      Sent Invitations ({groupInvitations.length})
+                    </p>
+                    <div className="max-h-36 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
+                      {groupInvitations.map((inv) => (
+                        <div key={inv.id} className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/50 flex items-center justify-between text-xs">
+                          <div className="min-w-0 pr-2">
+                            <p className="text-slate-200 font-medium truncate text-[11px]">{inv.email}</p>
+                            <span className={`inline-block text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${inv.status === 'accepted'
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : (inv.status === 'declined' || inv.is_expired)
+                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              }`}>
+                              {inv.is_expired ? 'expired' : inv.status}
+                            </span>
+                          </div>
+
+                          {inv.status === 'pending' && !inv.is_expired && (
+                            <button
+                              type="button"
+                              onClick={() => handleCopyLink(inv.id)}
+                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded text-[10px] font-semibold flex items-center space-x-1 cursor-pointer transition-colors border border-slate-700/50 flex-shrink-0"
+                              title="Copy Shareable Invite Link"
+                            >
+                              {copiedInviteId === inv.id ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                  <span className="text-emerald-400">Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy Link</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
           {/* Budget Limit Configurations */}
-          <div className="glass-panel rounded-2xl p-6">
-            <div className="flex items-center space-x-2.5 mb-4">
-              <Bell className="w-5 h-5 text-indigo-400" />
-              <h3 className="text-lg font-bold text-white font-sans">Group Budget</h3>
-            </div>
-
-            {budget ? (
-              <div className="space-y-4">
-                <div className="flex justify-between text-xs text-slate-400">
-                  <span>Spend Progress</span>
-                  <span>{budgetProgress.toFixed(0)}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div
-                    className={`h-2 rounded-full transition-all duration-500 ${isBudgetExceeded ? 'bg-rose-500' : 'bg-indigo-500'}`}
-                    style={{ width: `${budgetProgress}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-slate-400 mt-2">
-                  Total Spent: <span className="text-white font-semibold">₹{totalSpent.toFixed(2)}</span> of <span className="text-indigo-400 font-semibold">₹{Number(budget.amount_limit).toFixed(2)}</span>
-                </p>
+          {isOwner && (
+            <div className="glass-panel rounded-2xl p-6">
+              <div className="flex items-center space-x-2.5 mb-4">
+                <Bell className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white font-sans">Group Budget</h3>
               </div>
-            ) : (
-              <p className="text-slate-500 text-xs py-2">No budget limit set for this group.</p>
-            )}
 
-            {isCreator && (
-              <form onSubmit={handleSetBudget} className="mt-4 pt-4 border-t border-slate-800/40 flex items-end space-x-2">
-                <div className="flex-1">
-                  <label htmlFor="budgetLimit" className="block text-slate-400 text-[10px] font-semibold uppercase tracking-wider mb-1">
-                    {budget ? 'Update' : 'Set'} Limit (₹)
-                  </label>
-                  <input
-                    id="budgetLimit"
-                    type="number"
-                    required
-                    min="1"
-                    step="0.01"
-                    value={newBudgetLimit}
-                    onChange={(e) => setNewBudgetLimit(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg glass-input text-xs"
-                    placeholder="Enter budget limit"
-                  />
+              {budget ? (
+                <div className="space-y-4">
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>Spend Progress</span>
+                    <span>{budgetProgress.toFixed(0)}%</span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all duration-500 ${isBudgetExceeded ? 'bg-rose-500' : 'bg-indigo-500'}`}
+                      style={{ width: `${budgetProgress}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">
+                    Total Spent: <span className="text-white font-semibold">₹{totalSpent.toFixed(2)}</span> of <span className="text-indigo-400 font-semibold">₹{Number(budget.amount_limit).toFixed(2)}</span>
+                  </p>
                 </div>
-                <button
-                  type="submit"
-                  disabled={settingBudget}
-                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
-                >
-                  {settingBudget ? '...' : 'Save'}
-                </button>
-              </form>
-            )}
-          </div>
+              ) : (
+                <p className="text-slate-500 text-xs py-2">No budget limit set for this group.</p>
+              )}
+
+              {isCreator && (
+                <form onSubmit={handleSetBudget} className="mt-4 pt-4 border-t border-slate-800/40 flex items-end space-x-2">
+                  <div className="flex-1">
+                    <label htmlFor="budgetLimit" className="block text-slate-400 text-[10px] font-semibold uppercase tracking-wider mb-1">
+                      {budget ? 'Update' : 'Set'} Limit (₹)
+                    </label>
+                    <input
+                      id="budgetLimit"
+                      type="number"
+                      required
+                      min="1"
+                      step="0.01"
+                      value={newBudgetLimit}
+                      onChange={(e) => setNewBudgetLimit(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg glass-input text-xs"
+                      placeholder="Enter budget limit"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={settingBudget}
+                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
+                  >
+                    {settingBudget ? '...' : 'Save'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right Column: Expense History & Split Details */}
         <div className="space-y-6 lg:col-span-2">
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-xl font-bold text-white font-sans">Expenses History</h2>
-            {isCreator && (
+            {group?.user_permissions?.can_add_expense && (
               <button
                 onClick={() => openExpenseModal(null)}
                 className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-400 hover:text-indigo-300 font-semibold text-xs rounded-xl transition-all cursor-pointer"
@@ -685,7 +765,7 @@ export default function GroupDetails() {
                         <div className="pt-2">
                           <div className="flex justify-between items-center mb-2">
                             <h5 className="font-semibold text-slate-300 uppercase tracking-wider text-[9px]">Splits Shares</h5>
-                            {isCreator && (
+                            {expense.created_by === user?.id && (
                               <Link
                                 to={`/groups/${groupId}/expenses/${expense.id}/split`}
                                 className="text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
@@ -698,7 +778,7 @@ export default function GroupDetails() {
                           {!expense.splits || expense.splits.length === 0 ? (
                             <div className="text-center py-4 bg-slate-900/30 rounded-xl border border-dashed border-slate-800/50">
                               <p className="text-slate-500 text-xs">This expense hasn't been split yet.</p>
-                              {isCreator && (
+                              {expense.created_by === user?.id && (
                                 <Link
                                   to={`/groups/${groupId}/expenses/${expense.id}/split`}
                                   className="mt-2 inline-block px-3 py-1.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 rounded-lg text-xs font-semibold"
@@ -719,23 +799,27 @@ export default function GroupDetails() {
                           )}
                         </div>
 
-                        {/* Creator options */}
-                        {isCreator && (
+                        {/* Creator / Member options */}
+                        {(group?.user_permissions?.can_edit_expense || group?.user_permissions?.can_delete_expense) && (
                           <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800/40 text-xs">
-                            <button
-                              onClick={() => openExpenseModal(expense)}
-                              className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-300 hover:bg-slate-800/30 transition-all cursor-pointer"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              onClick={() => setDeletingExpense(expense)}
-                              className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Delete</span>
-                            </button>
+                            {group?.user_permissions?.can_edit_expense && (
+                              <button
+                                onClick={() => openExpenseModal(expense)}
+                                className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-300 hover:bg-slate-800/30 transition-all cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>Edit</span>
+                              </button>
+                            )}
+                            {group?.user_permissions?.can_delete_expense && (
+                              <button
+                                onClick={() => setDeletingExpense(expense)}
+                                className="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Delete</span>
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -934,6 +1018,46 @@ export default function GroupDetails() {
                 />
               </div>
 
+              {isCreator && !isEditingOwner && (
+                <div className="space-y-3 pt-3 border-t border-slate-800/40">
+                  <span className="block text-slate-300 text-xs font-semibold uppercase tracking-wider">
+                    Member Permissions
+                  </span>
+
+                  <div className="space-y-2">
+                    <label className="flex items-center space-x-3 text-slate-300 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={memberFormCanAddExpense}
+                        onChange={(e) => setMemberFormCanAddExpense(e.target.checked)}
+                        className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 w-4 h-4 cursor-pointer"
+                      />
+                      <span>Can Add Expenses (default: Yes)</span>
+                    </label>
+
+                    <label className="flex items-center space-x-3 text-slate-300 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={memberFormCanEditExpense}
+                        onChange={(e) => setMemberFormCanEditExpense(e.target.checked)}
+                        className="rounded border-slate-700 bg-slate-950/40 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 w-4 h-4 cursor-pointer"
+                      />
+                      <span>Can Edit Expenses</span>
+                    </label>
+
+                    <label className="flex items-center space-x-3 text-slate-300 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={memberFormCanDeleteExpense}
+                        onChange={(e) => setMemberFormCanDeleteExpense(e.target.checked)}
+                        className="rounded border-slate-700 bg-slate-950/40 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 w-4 h-4 cursor-pointer"
+                      />
+                      <span>Can Delete Expenses</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -1041,37 +1165,24 @@ export default function GroupDetails() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="modalExpAmount" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
-                      Amount (₹)
-                    </label>
-                    <input
-                      id="modalExpAmount"
-                      type="number"
-                      required
-                      step="0.01"
-                      min="0.01"
-                      value={expenseFormAmount}
-                      onChange={(e) => setExpenseFormAmount(e.target.value)}
-                      className={`w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white ${expenseFormErrors.amount ? 'border-rose-500/50' : ''}`}
-                      placeholder="0.00"
-                    />
-                    {expenseFormErrors.amount && (
-                      <p className="mt-1 text-[10px] text-rose-400">{expenseFormErrors.amount[0]}</p>
-                    )}
-                  </div>
-
-                  <Dropdown
-                    id="modalExpPaidBy"
-                    label="Paid By"
+                <div>
+                  <label htmlFor="modalExpAmount" className="block text-slate-300 text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                    Amount (₹)
+                  </label>
+                  <input
+                    id="modalExpAmount"
+                    type="number"
                     required
-                    size="sm"
-                    value={expenseFormPaidBy}
-                    onChange={(e) => setExpenseFormPaidBy(e.target.value)}
-                    options={members.map(m => ({ value: m.id, label: m.name, sublabel: m.email }))}
-                    placeholder="Select payer"
+                    step="0.01"
+                    min="0.01"
+                    value={expenseFormAmount}
+                    onChange={(e) => setExpenseFormAmount(e.target.value)}
+                    className={`w-full px-4 py-2.5 rounded-xl glass-input text-xs font-sans text-white ${expenseFormErrors.amount ? 'border-rose-500/50' : ''}`}
+                    placeholder="0.00"
                   />
+                  {expenseFormErrors.amount && (
+                    <p className="mt-1 text-[10px] text-rose-400">{expenseFormErrors.amount[0]}</p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

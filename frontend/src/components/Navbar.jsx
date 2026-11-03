@@ -26,10 +26,14 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/30">
+            <Link
+              to="/profile"
+              className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/30 hover:bg-slate-750/50 hover:border-slate-600/50 transition-all cursor-pointer"
+              title="My Profile"
+            >
               <User className="w-4 h-4 text-indigo-400" />
               <span className="text-slate-200 text-sm font-medium">{user?.username}</span>
-            </div>
+            </Link>
 
             <button
               onClick={handleLogout}

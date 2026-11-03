@@ -77,6 +77,9 @@ class Member(models.Model):
     name = models.CharField(max_length=100)
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=15, blank=True)
+    can_add_expense = models.BooleanField(default=True)
+    can_edit_expense = models.BooleanField(default=False)
+    can_delete_expense = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -100,6 +103,12 @@ class Invitation(models.Model):
 
     class Meta:
         unique_together = ('group', 'email')
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        return self.status == 'pending' and timezone.now() > self.created_at + timedelta(hours=24)
 
     def __str__(self):
         return f"Invite for {self.email} to {self.group.name}"

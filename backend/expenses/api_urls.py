@@ -7,6 +7,7 @@ urlpatterns = [
     path('login/', api_views.api_login, name='api_login'),
     path('logout/', api_views.api_logout, name='api_logout'),
     path('me/', api_views.api_me, name='api_me'),
+    path('change-password/', api_views.api_change_password, name='api_change_password'),
     
     # Groups
     path('groups/', api_views.group_list_create, name='api_group_list_create'),
@@ -37,7 +38,9 @@ urlpatterns = [
 
     # Invitations
     path('invitations/', api_views.list_pending_invitations, name='api_list_pending_invitations'),
+    path('invitations/<int:pk>/', api_views.get_invitation_detail, name='api_invitation_detail'),
     path('invitations/<int:pk>/accept/', api_views.accept_invitation, name='api_accept_invitation'),
     path('invitations/<int:pk>/decline/', api_views.decline_invitation, name='api_decline_invitation'),
     path('groups/<int:group_pk>/invitations/', api_views.invite_member, name='api_invite_member'),
+    path('groups/<int:group_pk>/invitations/list/', api_views.list_group_invitations, name='api_list_group_invitations'),
 ]

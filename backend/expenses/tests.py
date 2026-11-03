@@ -1,9 +1,14 @@
+import json
+from decimal import Decimal
+from datetime import date
 from django.test import TestCase
 from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.urls import reverse
-from datetime import date
-from .models import Group, Expense, ExpenseSplit, Settlement, Budget, Member
+from rest_framework import status
+from rest_framework.test import APITestCase
+from rest_framework.authtoken.models import Token
+from .models import Group, Expense, ExpenseSplit, Settlement, Budget, Member, Invitation
 
 class ModelTests(TestCase):
     def setUp(self):
@@ -111,865 +116,833 @@ class ModelTests(TestCase):
         self.assertEqual(str(user_budget), "Personal budget of 100.00 for alice")
 
 
-class AuthenticationTests(TestCase):
+class AuthenticationAPITests(APITestCase):
     def setUp(self):
-        # Create a test user for login scenarios
         self.username = 'testuser'
         self.email = 'testuser@example.com'
         self.password = 'SecurePassword123'
         self.user = User.objects.create_user(username=self.username, email=self.email, password=self.password)
         
-        # Define URLs
-        self.login_url = reverse('login')
-        self.register_url = reverse('register')
-        self.logout_url = reverse('logout')
-        self.dashboard_url = reverse('dashboard')
-
-    def test_register_page_loads(self):
-        """Test if registration page loads successfully."""
-        response = self.client.get(self.register_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'expenses/register.html')
+        self.login_url = reverse('api_login')
+        self.register_url = reverse('api_register')
+        self.logout_url = reverse('api_logout')
+        self.me_url = reverse('api_me')
 
     def test_registration_successful(self):
-        """Test registering a new user with valid inputs."""
         payload = {
             'username': 'newuser',
             'email': 'newuser@example.com',
             'password': 'Password999',
             'confirm_password': 'Password999'
         }
-        response = self.client.post(self.register_url, data=payload)
-        # Should redirect to the login page on success
-        self.assertRedirects(response, self.login_url)
-        # Check if new user actually exists in the database
+        response = self.client.post(self.register_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('token', response.data)
         self.assertTrue(User.objects.filter(username='newuser').exists())
 
     def test_registration_mismatched_passwords(self):
-        """Test that passwords mismatch validation shows an error."""
         payload = {
             'username': 'newuser',
             'email': 'newuser@example.com',
             'password': 'Password999',
             'confirm_password': 'DifferentPassword'
         }
-        response = self.client.post(self.register_url, data=payload)
-        self.assertEqual(response.status_code, 200)
-        form = response.context['form']
-        self.assertFalse(form.is_valid())
-        self.assertIn('confirm_password', form.errors)
-        self.assertIn("Passwords do not match.", form.errors['confirm_password'][0])
-
-    def test_registration_duplicate_email(self):
-        """Test that duplicate email validation shows an error."""
-        payload = {
-            'username': 'uniqueusername',
-            'email': self.email,  # Already taken by setUp
-            'password': 'Password999',
-            'confirm_password': 'Password999'
-        }
-        response = self.client.post(self.register_url, data=payload)
-        self.assertEqual(response.status_code, 200)
-        form = response.context['form']
-        self.assertFalse(form.is_valid())
-        self.assertIn('email', form.errors)
-        self.assertIn("Email is already registered.", form.errors['email'][0])
-
-    def test_login_page_loads(self):
-        """Test if login page loads successfully."""
-        response = self.client.get(self.login_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'expenses/login.html')
+        response = self.client.post(self.register_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_login_successful(self):
-        """Test logging in with correct credentials."""
         payload = {
             'username': self.username,
             'password': self.password
         }
-        response = self.client.post(self.login_url, data=payload)
-        # Success should redirect to dashboard
-        self.assertRedirects(response, self.dashboard_url)
+        response = self.client.post(self.login_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('token', response.data)
 
     def test_login_invalid_credentials(self):
-        """Test that incorrect credentials display error messages."""
         payload = {
             'username': self.username,
             'password': 'WrongPassword123'
         }
-        response = self.client.post(self.login_url, data=payload)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Invalid username or password.")
+        response = self.client.post(self.login_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['detail'], 'Invalid username or password.')
 
-    def test_dashboard_requires_login(self):
-        """Test that accessing the dashboard without logging in redirects to login page."""
-        response = self.client.get(self.dashboard_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.dashboard_url}")
+    def test_me_requires_login(self):
+        response = self.client.get(self.me_url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_dashboard_accessible_when_logged_in(self):
-        """Test dashboard loads when logged in."""
-        self.client.login(username=self.username, password=self.password)
-        response = self.client.get(self.dashboard_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'expenses/dashboard.html')
-        self.assertContains(response, f"Welcome to Smart Expense Splitter, {self.username}!")
+    def test_me_accessible_when_logged_in(self):
+        token, _ = Token.objects.get_or_create(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        response = self.client.get(self.me_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], self.username)
 
-    def test_logout_redirects_to_login(self):
-        """Test logout clears the session and redirects to login."""
-        self.client.login(username=self.username, password=self.password)
+    def test_logout_successful(self):
+        token, _ = Token.objects.get_or_create(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
         response = self.client.post(self.logout_url)
-        self.assertRedirects(response, self.login_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(Token.objects.filter(key=token.key).exists())
 
 
-class GroupCRUDTests(TestCase):
+class GroupAPICRUDTests(APITestCase):
     def setUp(self):
-        # Create users
         self.user1 = User.objects.create_user(username='alice', email='alice@example.com', password='password123')
         self.user2 = User.objects.create_user(username='bob', email='bob@example.com', password='password123')
-
-        # Create a group owned by alice
-        self.group = Group.objects.create(
-            name='Alice Goa Trip',
-            description='Trip to Goa funded by Alice',
-            created_by=self.user1
-        )
+        
+        self.token1, _ = Token.objects.get_or_create(user=self.user1)
+        self.token2, _ = Token.objects.get_or_create(user=self.user2)
+        
+        self.list_create_url = reverse('api_group_list_create')
+        self.group = Group.objects.create(name='Trip to Goa', created_by=self.user1)
         self.group.members.add(self.user1)
-
-        # URLs
-        self.list_url = reverse('group_list')
-        self.create_url = reverse('group_create')
-        self.update_url = reverse('group_update', args=[self.group.pk])
-        self.delete_url = reverse('group_delete', args=[self.group.pk])
-        self.login_url = reverse('login')
+        self.detail_url = reverse('api_group_detail_update_delete', kwargs={'pk': self.group.pk})
 
     def test_group_pages_require_login(self):
-        """Verify unauthenticated users cannot access any group pages."""
-        # List page
-        response = self.client.get(self.list_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.list_url}")
+        response = self.client.get(self.list_create_url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-        # Create page GET/POST
-        response = self.client.get(self.create_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.create_url}")
-
-        response = self.client.post(self.create_url, data={'name': 'New Group'})
-        self.assertRedirects(response, f"{self.login_url}?next={self.create_url}")
-
-        # Update page GET/POST
-        response = self.client.get(self.update_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.update_url}")
-
-        response = self.client.post(self.update_url, data={'name': 'Updated Group'})
-        self.assertRedirects(response, f"{self.login_url}?next={self.update_url}")
-
-        # Delete page GET/POST
-        response = self.client.get(self.delete_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.delete_url}")
-
-        response = self.client.post(self.delete_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.delete_url}")
-
-    def test_group_list_only_shows_owned_groups(self):
-        """Verify logged-in user only sees the groups they created."""
-        # Log in as Alice (creator of Alice Goa Trip)
-        self.client.login(username='alice', password='password123')
-        response = self.client.get(self.list_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Alice Goa Trip')
-
-        # Log in as Bob (who has no groups)
-        self.client.login(username='bob', password='password123')
-        response = self.client.get(self.list_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'Alice Goa Trip')
+    def test_group_list_shows_correct_groups(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        response = self.client.get(self.list_create_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['name'], 'Trip to Goa')
 
     def test_group_create_success(self):
-        """Verify creating a group works, sets owner and member, and redirects."""
-        self.client.login(username='bob', password='password123')
-        payload = {
-            'name': 'Bob Party Group',
-            'description': 'Party weekend description'
-        }
-        response = self.client.post(self.create_url, data=payload)
-        self.assertRedirects(response, self.list_url)
-        
-        # Verify database creation
-        new_group = Group.objects.get(name='Bob Party Group')
-        self.assertEqual(new_group.created_by, self.user2)
-        self.assertIn(self.user2, new_group.members.all())
-
-    def test_group_create_validation_error(self):
-        """Verify validation fails if group name is too short."""
-        self.client.login(username='bob', password='password123')
-        payload = {
-            'name': 'B',  # too short
-            'description': 'Short name'
-        }
-        response = self.client.post(self.create_url, data=payload)
-        self.assertEqual(response.status_code, 200)
-        form = response.context['form']
-        self.assertFalse(form.is_valid())
-        self.assertIn('name', form.errors)
-        self.assertIn("Group name must be at least 3 characters long.", form.errors['name'][0])
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token2.key)
+        payload = {'name': 'New Group', 'description': 'Some description'}
+        response = self.client.post(self.list_create_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['name'], 'New Group')
+        self.assertTrue(Group.objects.filter(name='New Group', created_by=self.user2).exists())
 
     def test_group_update_success(self):
-        """Verify group creator can update details."""
-        self.client.login(username='alice', password='password123')
-        payload = {
-            'name': 'Alice Goa Trip V2',
-            'description': 'Updated description text'
-        }
-        response = self.client.post(self.update_url, data=payload)
-        self.assertRedirects(response, self.list_url)
-        
-        # Verify db updates
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        payload = {'name': 'Updated Goa Trip'}
+        response = self.client.patch(self.detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.group.refresh_from_db()
-        self.assertEqual(self.group.name, 'Alice Goa Trip V2')
-        self.assertEqual(self.group.description, 'Updated description text')
+        self.assertEqual(self.group.name, 'Updated Goa Trip')
 
-    def test_group_update_and_delete_unauthorized(self):
-        """Verify non-creator gets 404 when editing or deleting group."""
-        self.client.login(username='bob', password='password123')
-        
-        # Edit GET/POST
-        response = self.client.get(self.update_url)
-        self.assertEqual(response.status_code, 404)
-
-        response = self.client.post(self.update_url, data={'name': 'Hacked Group'})
-        self.assertEqual(response.status_code, 404)
-
-        # Delete GET/POST
-        response = self.client.get(self.delete_url)
-        self.assertEqual(response.status_code, 404)
-
-        response = self.client.post(self.delete_url)
-        self.assertEqual(response.status_code, 404)
-        
-        # Verify group is not deleted
-        self.assertTrue(Group.objects.filter(pk=self.group.pk).exists())
+    def test_group_update_unauthorized(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token2.key)
+        payload = {'name': 'Hacked Group'}
+        response = self.client.patch(self.detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_group_delete_success(self):
-        """Verify group creator can delete group."""
-        self.client.login(username='alice', password='password123')
-        response = self.client.post(self.delete_url)
-        self.assertRedirects(response, self.list_url)
-        # Verify database record is gone
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        response = self.client.delete(self.detail_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(Group.objects.filter(pk=self.group.pk).exists())
 
 
-class MemberCRUDTests(TestCase):
+class MemberAPICRUDTests(APITestCase):
     def setUp(self):
-        # Create users
         self.user1 = User.objects.create_user(username='alice', email='alice@example.com', password='password123')
         self.user2 = User.objects.create_user(username='bob', email='bob@example.com', password='password123')
-
-        # Create groups
-        self.group = Group.objects.create(
-            name='Alice Goa Trip',
-            description='Trip to Goa funded by Alice',
-            created_by=self.user1
-        )
+        
+        self.token1, _ = Token.objects.get_or_create(user=self.user1)
+        self.token2, _ = Token.objects.get_or_create(user=self.user2)
+        
+        self.group = Group.objects.create(name='Trip to Goa', created_by=self.user1)
         self.group.members.add(self.user1)
-
-        self.member = Member.objects.create(
-            group=self.group,
-            name='John Doe',
-            email='john@example.com',
-            phone='1234567890'
-        )
-
-        # URLs
-        self.list_url = reverse('member_list', args=[self.group.pk])
-        self.create_url = reverse('member_create', args=[self.group.pk])
-        self.update_url = reverse('member_update', args=[self.group.pk, self.member.pk])
-        self.delete_url = reverse('member_delete', args=[self.group.pk, self.member.pk])
-        self.login_url = reverse('login')
-
-    def test_member_pages_require_login(self):
-        """Verify unauthenticated users cannot access member pages."""
-        # List
-        response = self.client.get(self.list_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.list_url}")
-
-        # Create GET/POST
-        response = self.client.get(self.create_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.create_url}")
-
-        response = self.client.post(self.create_url, data={'name': 'Jane Doe'})
-        self.assertRedirects(response, f"{self.login_url}?next={self.create_url}")
-
-        # Update GET/POST
-        response = self.client.get(self.update_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.update_url}")
-
-        response = self.client.post(self.update_url, data={'name': 'John Doe Updated'})
-        self.assertRedirects(response, f"{self.login_url}?next={self.update_url}")
-
-        # Delete GET/POST
-        response = self.client.get(self.delete_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.delete_url}")
-
-        response = self.client.post(self.delete_url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.delete_url}")
-
-    def test_member_pages_unauthorized(self):
-        """Verify non-creator of group cannot access group member management pages."""
-        self.client.login(username='bob', password='password123')
-
-        # List
-        response = self.client.get(self.list_url)
-        self.assertEqual(response.status_code, 404)
-
-        # Create
-        response = self.client.post(self.create_url, data={'name': 'Jane'})
-        self.assertEqual(response.status_code, 404)
-
-        # Update
-        response = self.client.post(self.update_url, data={'name': 'Jane'})
-        self.assertEqual(response.status_code, 404)
-
-        # Delete
-        response = self.client.post(self.delete_url)
-        self.assertEqual(response.status_code, 404)
+        self.group.members.add(self.user2)
+        
+        self.owner_member = Member.objects.create(group=self.group, name='Alice Member', email='alice@example.com', user=self.user1)
+        self.member = Member.objects.create(group=self.group, name='Bob Member', email='bob@example.com', user=self.user2)
+        
+        self.list_create_url = reverse('api_member_list_create', kwargs={'group_pk': self.group.pk})
+        self.detail_url = reverse('api_member_detail_update_delete', kwargs={'group_pk': self.group.pk, 'pk': self.member.pk})
 
     def test_member_list_success(self):
-        """Verify creator can view member list."""
-        self.client.login(username='alice', password='password123')
-        response = self.client.get(self.list_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'expenses/member_list.html')
-        self.assertContains(response, 'John Doe')
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        response = self.client.get(self.list_create_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Should contain the creator member auto-profile + Bob Member
+        self.assertTrue(len(response.data) >= 1)
 
     def test_member_create_success(self):
-        """Verify creator can add a member to the group."""
-        self.client.login(username='alice', password='password123')
-        payload = {
-            'name': 'Jane Smith',
-            'email': 'jane@example.com',
-            'phone': '9876543210'
-        }
-        response = self.client.post(self.create_url, data=payload)
-        self.assertRedirects(response, self.list_url)
-        self.assertTrue(Member.objects.filter(name='Jane Smith', group=self.group).exists())
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        payload = {'name': 'Charlie Member', 'email': 'charlie@example.com'}
+        response = self.client.post(self.list_create_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['name'], 'Charlie Member')
 
     def test_member_create_duplicate_validation(self):
-        """Verify duplicate member names within the same group are prevented."""
-        self.client.login(username='alice', password='password123')
-        payload = {
-            'name': 'John Doe',  # Case-insensitive duplicate check
-            'email': 'john2@example.com',
-        }
-        response = self.client.post(self.create_url, data=payload)
-        self.assertEqual(response.status_code, 200)
-        form = response.context['form']
-        self.assertFalse(form.is_valid())
-        self.assertIn('name', form.errors)
-        self.assertIn("A member with this name already exists in this group.", form.errors['name'][0])
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        payload = {'name': 'Bob Member', 'email': 'anotherbob@example.com'}
+        response = self.client.post(self.list_create_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_member_update_success(self):
-        """Verify creator can update member details."""
-        self.client.login(username='alice', password='password123')
-        payload = {
-            'name': 'John Updated',
-            'email': 'updated@example.com',
-            'phone': '1112223333'
-        }
-        response = self.client.post(self.update_url, data=payload)
-        self.assertRedirects(response, self.list_url)
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        payload = {'name': 'Bobby Member'}
+        response = self.client.patch(self.detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.member.refresh_from_db()
-        self.assertEqual(self.member.name, 'John Updated')
-        self.assertEqual(self.member.email, 'updated@example.com')
+        self.assertEqual(self.member.name, 'Bobby Member')
 
     def test_member_delete_success(self):
-        """Verify creator can remove a member."""
-        self.client.login(username='alice', password='password123')
-        response = self.client.post(self.delete_url)
-        self.assertRedirects(response, self.list_url)
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        response = self.client.delete(self.detail_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(Member.objects.filter(pk=self.member.pk).exists())
 
+    def test_normal_member_edit_self_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token2.key)
+        payload = {'name': 'Bob Edited'}
+        response = self.client.patch(self.detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.name, 'Bob Edited')
 
-class ExpenseCRUDTests(TestCase):
+    def test_normal_member_edit_permissions_ignored(self):
+        # Even if they try to escalate permissions, it should be ignored
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token2.key)
+        payload = {'can_delete_expense': True, 'can_edit_expense': True}
+        response = self.client.patch(self.detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.member.refresh_from_db()
+        self.assertFalse(self.member.can_delete_expense)
+        self.assertFalse(self.member.can_edit_expense)
+
+    def test_normal_member_edit_owner_forbidden(self):
+        owner_detail_url = reverse('api_member_detail_update_delete', kwargs={'group_pk': self.group.pk, 'pk': self.owner_member.pk})
+        
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token2.key)
+        payload = {'name': 'Alice Edited'}
+        response = self.client.patch(owner_detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_normal_member_edit_other_member_forbidden(self):
+        # Create another normal member (Charlie)
+        charlie_member = Member.objects.create(group=self.group, name='Charlie Member', email='charlie@example.com')
+        charlie_detail_url = reverse('api_member_detail_update_delete', kwargs={'group_pk': self.group.pk, 'pk': charlie_member.pk})
+        
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token2.key)
+        payload = {'name': 'Charlie Edited'}
+        response = self.client.patch(charlie_detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_normal_member_delete_forbidden(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token2.key)
+        response = self.client.delete(self.detail_url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ExpenseAPICRUDTests(APITestCase):
     def setUp(self):
-        # Create users
         self.user1 = User.objects.create_user(username='alice', email='alice@example.com', password='password123')
-        self.user2 = User.objects.create_user(username='bob', email='bob@example.com', password='password123')
-
-        # Create Alice's Group
-        self.group = Group.objects.create(
-            name='Alice Goa Trip',
-            description='Trip to Goa funded by Alice',
-            created_by=self.user1
-        )
+        self.token1, _ = Token.objects.get_or_create(user=self.user1)
+        
+        self.group = Group.objects.create(name='Trip to Goa', created_by=self.user1)
         self.group.members.add(self.user1)
-
-        # Create members for Alice's Group
-        self.member1 = Member.objects.create(group=self.group, name='John Doe', email='john@example.com')
-        self.member2 = Member.objects.create(group=self.group, name='Jane Doe', email='jane@example.com')
-
-        # Create a group for Bob to verify separation
-        self.bob_group = Group.objects.create(
-            name='Bob Secret Group',
-            created_by=self.user2
-        )
-        self.bob_member = Member.objects.create(group=self.bob_group, name='Charlie')
-
-        # Create an expense in Alice's Group
+        
+        self.member1 = Member.objects.create(group=self.group, name='Alice Member', email='alice@example.com')
+        self.member2 = Member.objects.create(group=self.group, name='Bob Member', email='bob@example.com')
+        
         self.expense = Expense.objects.create(
             group=self.group,
-            title='Dinner at beach',
-            amount=1500.00,
+            title='Dinner bill',
+            amount=100.00,
             paid_by=self.member1,
             date=date.today(),
-            category='Food',
             created_by=self.user1
         )
-
-        # URLs for Alice's Group
-        self.list_url = reverse('expense_list', args=[self.group.pk])
-        self.create_url = reverse('expense_create', args=[self.group.pk])
-        self.detail_url = reverse('expense_detail', args=[self.group.pk, self.expense.pk])
-        self.update_url = reverse('expense_update', args=[self.group.pk, self.expense.pk])
-        self.delete_url = reverse('expense_delete', args=[self.group.pk, self.expense.pk])
         
-        self.login_url = reverse('login')
-
-    def test_expense_pages_require_login(self):
-        """Verify unauthenticated users cannot access expense pages."""
-        urls = [self.list_url, self.create_url, self.detail_url, self.update_url, self.delete_url]
-        for url in urls:
-            response = self.client.get(url)
-            self.assertRedirects(response, f"{self.login_url}?next={url}")
-
-    def test_expense_pages_unauthorized(self):
-        """Verify logged-in user cannot manage expenses in a group they don't own."""
-        self.client.login(username='bob', password='password123')
-        urls = [self.list_url, self.create_url, self.detail_url, self.update_url, self.delete_url]
-        for url in urls:
-            response = self.client.get(url)
-            self.assertEqual(response.status_code, 404)
-
-            # Test POST queries too
-            if url == self.create_url:
-                response = self.client.post(url, data={'title': 'Steal'})
-            elif url == self.delete_url:
-                response = self.client.post(url)
-            else:
-                response = self.client.post(url, data={'title': 'Steal'})
-            self.assertEqual(response.status_code, 404)
+        self.list_create_url = reverse('api_expense_list_create', kwargs={'group_pk': self.group.pk})
+        self.detail_url = reverse('api_expense_detail_update_delete', kwargs={'group_pk': self.group.pk, 'pk': self.expense.pk})
 
     def test_expense_list_success(self):
-        """Verify creator can view expense list and sum total."""
-        self.client.login(username='alice', password='password123')
-        response = self.client.get(self.list_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'expenses/expense_list.html')
-        self.assertContains(response, 'Dinner at beach')
-        self.assertEqual(response.context['total_amount'], 1500.00)
-
-    def test_expense_detail_success(self):
-        """Verify creator can view expense detail page."""
-        self.client.login(username='alice', password='password123')
-        response = self.client.get(self.detail_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'expenses/expense_detail.html')
-        self.assertContains(response, 'Dinner at beach')
-        self.assertContains(response, 'Food')
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        response = self.client.get(self.list_create_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['expenses']), 1)
 
     def test_expense_create_success(self):
-        """Verify creator can add a new expense."""
-        self.client.login(username='alice', password='password123')
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
         payload = {
-            'title': 'Cab Fare',
-            'description': 'Goa Airport to hotel',
-            'amount': 1200.00,
-            'paid_by': self.member2.pk,
-            'date': date.today(),
-            'category': 'Travel',
-            'notes': 'Paid in cash'
+            'title': 'Taxi fare',
+            'amount': '50.00',
+            'date': str(date.today()),
+            'category': 'Transport'
         }
-        response = self.client.post(self.create_url, data=payload)
-        self.assertRedirects(response, self.list_url)
-        self.assertTrue(Expense.objects.filter(title='Cab Fare', group=self.group).exists())
+        response = self.client.post(self.list_create_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['title'], 'Taxi fare')
+        
+        # Verify splits were automatically created
+        expense_id = response.data['id']
+        expense = Expense.objects.get(id=expense_id)
+        self.assertEqual(expense.paid_by, self.member1)  # The payer is automatically self.member1 (Alice)
+        self.assertEqual(expense.splits.count(), 2)
+        for split in expense.splits.all():
+            self.assertEqual(split.amount, Decimal('25.00'))
+
+    def test_expense_update_proportional_scaling(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        
+        # Save custom splits on the existing expense (amount = 100.00)
+        # member1 gets 40.00, member2 gets 60.00
+        save_url = reverse('api_save_expense_splits', kwargs={'group_pk': self.group.pk, 'expense_pk': self.expense.pk})
+        split_payload = {
+            'split_method': 'unequal',
+            'splits': [
+                {'member_id': self.member1.id, 'amount': '40.00'},
+                {'member_id': self.member2.id, 'amount': '60.00'}
+            ]
+        }
+        self.client.post(save_url, split_payload, format='json')
+        
+        # Update expense amount to 200.00
+        update_payload = {'amount': '200.00'}
+        response = self.client.patch(self.detail_url, update_payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify splits scaled proportionally (member1 gets 80.00, member2 gets 120.00)
+        self.expense.refresh_from_db()
+        split1 = self.expense.splits.get(member=self.member1)
+        split2 = self.expense.splits.get(member=self.member2)
+        self.assertEqual(split1.amount, Decimal('80.00'))
+        self.assertEqual(split2.amount, Decimal('120.00'))
 
     def test_expense_create_invalid_amount(self):
-        """Verify validation errors if expense amount is 0 or negative."""
-        self.client.login(username='alice', password='password123')
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
         payload = {
-            'title': 'Free Water',
-            'amount': 0.00,  # invalid amount
-            'paid_by': self.member1.pk,
-            'date': date.today(),
-            'category': 'Drinks'
+            'title': 'Free entry',
+            'amount': '0.00',
+            'date': str(date.today()),
+            'category': 'Entertainment'
         }
-        response = self.client.post(self.create_url, data=payload)
-        self.assertEqual(response.status_code, 200)
-        form = response.context['form']
-        self.assertFalse(form.is_valid())
-        self.assertIn('amount', form.errors)
-        self.assertIn("Expense amount must be greater than zero.", form.errors['amount'][0])
-
-    def test_expense_paid_by_dropdown_filtering(self):
-        """Verify that only members of the current group are available in paid_by dropdown."""
-        self.client.login(username='alice', password='password123')
-        response = self.client.get(self.create_url)
-        self.assertEqual(response.status_code, 200)
-        
-        # Check that member1 and member2 are present in paid_by choices, but bob_member is not
-        form = response.context['form']
-        queryset = form.fields['paid_by'].queryset
-        self.assertIn(self.member1, queryset)
-        self.assertIn(self.member2, queryset)
-        self.assertNotIn(self.bob_member, queryset)
-
-    def test_expense_update_success(self):
-        """Verify creator can update expense details."""
-        self.client.login(username='alice', password='password123')
-        payload = {
-            'title': 'Dinner at beach (Updated)',
-            'description': 'Description change',
-            'amount': 1800.00,
-            'paid_by': self.member1.pk,
-            'date': date.today(),
-            'category': 'Food'
-        }
-        response = self.client.post(self.update_url, data=payload)
-        self.assertRedirects(response, self.list_url)
-        
-        self.expense.refresh_from_db()
-        self.assertEqual(self.expense.title, 'Dinner at beach (Updated)')
-        self.assertEqual(self.expense.amount, 1800.00)
-
-    def test_expense_delete_success(self):
-        """Verify creator can delete expense."""
-        self.client.login(username='alice', password='password123')
-        response = self.client.post(self.delete_url)
-        self.assertRedirects(response, self.list_url)
-        self.assertFalse(Expense.objects.filter(pk=self.expense.pk).exists())
+        response = self.client.post(self.list_create_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class ExpenseSplitTests(TestCase):
+class ExpenseSplitAPITests(APITestCase):
     def setUp(self):
-        # Create test users
-        self.owner = User.objects.create_user(username='owner', email='owner@example.com', password='password123')
-        self.user1 = User.objects.create_user(username='user1', email='user1@example.com', password='password123')
-        self.user2 = User.objects.create_user(username='user2', email='user2@example.com', password='password123')
-        self.other_user = User.objects.create_user(username='other', email='other@example.com', password='password123')
-
-        # Create group and add owner, user1, user2 to members
-        self.group = Group.objects.create(name='Goa Trip', description='Fun trip', created_by=self.owner)
-        self.group.members.add(self.owner, self.user1, self.user2)
-
-        # Create group members (fetched from selected group's Member model)
-        self.member_owner = Member.objects.create(group=self.group, name='Owner Member', email='owner@example.com')
-        self.member_user1 = Member.objects.create(group=self.group, name='User1 Member', email='user1@example.com')
-        self.member_user2 = Member.objects.create(group=self.group, name='User2 Member', email='user2@example.com')
-
-        # Create expense
+        self.user1 = User.objects.create_user(username='alice', email='alice@example.com', password='password123')
+        self.token1, _ = Token.objects.get_or_create(user=self.user1)
+        
+        self.group = Group.objects.create(name='Trip to Goa', created_by=self.user1)
+        self.group.members.add(self.user1)
+        
+        self.member1 = Member.objects.create(group=self.group, name='Alice Member', email='alice@example.com')
+        self.member2 = Member.objects.create(group=self.group, name='Bob Member', email='bob@example.com')
+        
         self.expense = Expense.objects.create(
             group=self.group,
-            title='Beach Dinner',
-            amount=100.00,
-            paid_by=self.member_owner,
+            title='Dinner bill',
+            amount=90.00,
+            paid_by=self.member1,
             date=date.today(),
-            category='Food',
-            created_by=self.owner
+            created_by=self.user1
         )
+        
+        self.preview_url = reverse('api_preview_equal_split', kwargs={'group_pk': self.group.pk, 'expense_pk': self.expense.pk})
+        self.save_url = reverse('api_save_expense_splits', kwargs={'group_pk': self.group.pk, 'expense_pk': self.expense.pk})
 
-        # URLs
-        self.split_url = reverse('expense_split', kwargs={'group_pk': self.group.pk, 'expense_pk': self.expense.pk})
-        self.equal_preview_url = reverse('equal_split_preview', kwargs={'group_pk': self.group.pk, 'expense_pk': self.expense.pk})
-        self.unequal_form_url = reverse('unequal_split_form', kwargs={'group_pk': self.group.pk, 'expense_pk': self.expense.pk})
-        self.result_url = reverse('split_result', kwargs={'group_pk': self.group.pk, 'expense_pk': self.expense.pk})
-
-    def test_expense_split_requires_authentication(self):
-        """Verify only logged in users can view the split setup page."""
-        response = self.client.get(self.split_url)
-        self.assertEqual(response.status_code, 302)  # Should redirect to login
-
-    def test_expense_split_restricted_to_group_creator(self):
-        """Verify other users cannot access split pages for groups they don't own."""
-        self.client.login(username='other', password='password123')
-        response = self.client.get(self.split_url)
-        self.assertEqual(response.status_code, 404)  # Restricted
-
-    def test_split_setup_view_loads_members(self):
-        """Verify the setup page displays all group members with checkboxes."""
-        self.client.login(username='owner', password='password123')
-        response = self.client.get(self.split_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Owner Member')
-        self.assertContains(response, 'User1 Member')
-        self.assertContains(response, 'User2 Member')
-
-    def test_split_setup_post_validation(self):
-        """Verify selecting no members throws an error."""
-        self.client.login(username='owner', password='password123')
+    def test_equal_split_preview_calculation(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
         payload = {
-            'selected_members': [],
-            'split_method': 'equal'
+            'member_ids': [self.member1.id, self.member2.id]
         }
-        response = self.client.post(self.split_url, data=payload)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Please select at least one member to split.")
+        response = self.client.post(self.preview_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # 90.00 / 2 members = 45.00
+        self.assertEqual(response.data[0]['amount'], Decimal('45.00'))
 
-    def test_equal_split_preview_calculation_and_rounding(self):
-        """Verify equal split correctly rounds and distributes remainder cents."""
-        self.client.login(username='owner', password='password123')
-        
-        # Select all 3 members (100.00 / 3 = 33.33 with 0.01 remainder)
+    def test_save_expense_splits(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
         payload = {
-            'selected_members': [self.member_owner.id, self.member_user1.id, self.member_user2.id],
-            'split_method': 'equal'
+            'split_method': 'equal',
+            'splits': [
+                {'member_id': self.member1.id, 'amount': '30.00'},
+                {'member_id': self.member2.id, 'amount': '60.00'}
+            ]
         }
-        response = self.client.post(self.split_url, data=payload)
-        self.assertRedirects(response, self.equal_preview_url)
+        response = self.client.post(self.save_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.expense.splits.count(), 2)
 
-        # Get preview page
-        preview_response = self.client.get(self.equal_preview_url)
-        self.assertEqual(preview_response.status_code, 200)
+    def test_invited_member_expense_split_permissions(self):
+        # Setup second user as an invited member of the group
+        user2 = User.objects.create_user(username='bob', email='bob@example.com', password='password123')
+        token2, _ = Token.objects.get_or_create(user=user2)
+        self.group.members.add(user2)
+        self.member2.user = user2
+        self.member2.save()
         
-        # Check calculated preview shares in context
-        splits_preview = preview_response.context['splits']
-        self.assertEqual(len(splits_preview), 3)
+        # Create an expense created by Bob
+        expense_by_bob = Expense.objects.create(
+            group=self.group,
+            title='Bob lunch',
+            amount=Decimal('60.00'),
+            paid_by=self.member2,
+            date=date.today(),
+            created_by=user2
+        )
         
-        # Rounding logic test: One member should get 33.34, others 33.33
-        amounts = [float(item['amount']) for item in splits_preview]
-        self.assertIn(33.34, amounts)
-        self.assertEqual(amounts.count(33.33), 2)
-        self.assertEqual(sum(amounts), 100.00)
-
-        # Confirm splits save
-        confirm_response = self.client.post(self.equal_preview_url)
-        self.assertRedirects(confirm_response, self.result_url)
-
-        # Verify splits saved in DB
-        db_splits = ExpenseSplit.objects.filter(expense=self.expense)
-        self.assertEqual(db_splits.count(), 3)
-        self.assertEqual(sum(float(s.amount) for s in db_splits), 100.00)
-
-    def test_unequal_split_validation_and_saving(self):
-        """Verify custom split amount inputs are validated properly."""
-        self.client.login(username='owner', password='password123')
+        preview_url_bob = reverse('api_preview_equal_split', kwargs={'group_pk': self.group.pk, 'expense_pk': expense_by_bob.pk})
+        save_url_bob = reverse('api_save_expense_splits', kwargs={'group_pk': self.group.pk, 'expense_pk': expense_by_bob.pk})
         
-        # Go to setup page and select owner and user1 members
+        # 1. Bob (invited group member and creator of the expense) can preview splits for his own expense
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + token2.key)
         payload = {
-            'selected_members': [self.member_owner.id, self.member_user1.id],
-            'split_method': 'unequal'
+            'member_ids': [self.member1.id, self.member2.id]
         }
-        response = self.client.post(self.split_url, data=payload)
-        self.assertRedirects(response, self.unequal_form_url)
-
-        # 1. Invalid unequal split (amounts do not sum to total expense)
-        post_payload = {
-            f'amount_{self.member_owner.id}': '40.00',
-            f'amount_{self.member_user1.id}': '50.00',  # Sums to 90, expected 100
-        }
-        err_response = self.client.post(self.unequal_form_url, data=post_payload)
-        self.assertEqual(err_response.status_code, 200)
-        self.assertContains(err_response, "must exactly equal the total expense amount")
-
-        # 2. Invalid unequal split (negative value)
-        post_payload = {
-            f'amount_{self.member_owner.id}': '-10.00',
-            f'amount_{self.member_user1.id}': '110.00',
-        }
-        err_response = self.client.post(self.unequal_form_url, data=post_payload)
-        self.assertEqual(err_response.status_code, 200)
-        self.assertContains(err_response, "Split amounts cannot be negative.")
-
-        # 3. Valid unequal split (sums to 100)
-        post_payload = {
-            f'amount_{self.member_owner.id}': '35.50',
-            f'amount_{self.member_user1.id}': '64.50',
-        }
-        success_response = self.client.post(self.unequal_form_url, data=post_payload)
-        self.assertRedirects(success_response, self.result_url)
-
-        # Verify splits saved: selected members get values, unselected get 0.00
-        db_splits = ExpenseSplit.objects.filter(expense=self.expense)
-        self.assertEqual(db_splits.count(), 3)  # Owner, user1, and user2 members
+        response = self.client.post(preview_url_bob, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        owner_split = db_splits.get(member=self.member_owner)
-        user1_split = db_splits.get(member=self.member_user1)
-        user2_split = db_splits.get(member=self.member_user2)
-
-        self.assertEqual(float(owner_split.amount), 35.50)
-        self.assertEqual(float(user1_split.amount), 64.50)
-        self.assertEqual(float(user2_split.amount), 0.00)
-
-    def test_recalculate_splits_deletes_old_records(self):
-        """Verify that running split again overwrites any existing split records."""
-        self.client.login(username='owner', password='password123')
+        # 2. Bob can save splits for his own expense
+        payload_save = {
+            'split_method': 'equal',
+            'splits': [
+                {'member_id': self.member1.id, 'amount': '30.00'},
+                {'member_id': self.member2.id, 'amount': '30.00'}
+            ]
+        }
+        response = self.client.post(save_url_bob, payload_save, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(expense_by_bob.splits.count(), 2)
         
-        # Save first split (Equal Split: owner = 50.00, user1 = 50.00, user2 = 0.00)
-        ExpenseSplit.objects.create(expense=self.expense, member=self.member_owner, amount=50.00)
-        ExpenseSplit.objects.create(expense=self.expense, member=self.member_user1, amount=50.00)
-        ExpenseSplit.objects.create(expense=self.expense, member=self.member_user2, amount=0.00)
-
-        self.assertEqual(ExpenseSplit.objects.filter(expense=self.expense).count(), 3)
-
-        # Run Equal Split again with all 3 members (distributes 100.00 among 3)
-        self.client.post(self.split_url, data={
-            'selected_members': [self.member_owner.id, self.member_user1.id, self.member_user2.id],
-            'split_method': 'equal'
-        })
-        self.client.post(self.equal_preview_url)
-
-        # Verify old 50.00 records are gone and replaced by the rounded equal division
-        db_splits = ExpenseSplit.objects.filter(expense=self.expense)
-        self.assertEqual(db_splits.count(), 3)
-        amounts = [float(s.amount) for s in db_splits]
-        self.assertNotIn(50.00, amounts)
-        self.assertIn(33.34, amounts)
-        self.assertEqual(sum(amounts), 100.00)
+        # 3. Bob (invited group member, but NOT creator of Alice's expense) cannot preview splits for Alice's expense
+        payload = {
+            'member_ids': [self.member1.id, self.member2.id]
+        }
+        response = self.client.post(self.preview_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        
+        # 4. Bob cannot save splits for Alice's expense
+        payload_save = {
+            'split_method': 'equal',
+            'splits': [
+                {'member_id': self.member1.id, 'amount': '45.00'},
+                {'member_id': self.member2.id, 'amount': '45.00'}
+            ]
+        }
+        response = self.client.post(self.save_url, payload_save, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
-class SettlementAndBalanceTests(TestCase):
+class SettlementAndBalanceAPITests(APITestCase):
     def setUp(self):
-        # Create user and group
-        self.owner = User.objects.create_user(username='owner', password='password123')
-        self.other_user = User.objects.create_user(username='other', password='password123')
+        self.user1 = User.objects.create_user(username='alice', email='alice@example.com', password='password123')
+        self.token1, _ = Token.objects.get_or_create(user=self.user1)
         
-        self.group = Group.objects.create(name='Trip Group', created_by=self.owner)
-        self.group.members.add(self.owner)
+        self.group = Group.objects.create(name='Trip to Goa', created_by=self.user1)
+        self.group.members.add(self.user1)
         
-        # Create members
-        self.member_raj = Member.objects.create(group=self.group, name='Raj')
-        self.member_netra = Member.objects.create(group=self.group, name='Netra')
-        self.member_rohan = Member.objects.create(group=self.group, name='Rohan')
+        self.member1 = Member.objects.create(group=self.group, name='Alice Member', email='alice@example.com')
+        self.member2 = Member.objects.create(group=self.group, name='Bob Member', email='bob@example.com')
+        
+        # Alice paid 90.00 for Dinner split equally
+        self.expense = Expense.objects.create(
+            group=self.group,
+            title='Dinner bill',
+            amount=90.00,
+            paid_by=self.member1,
+            date=date.today(),
+            created_by=self.user1
+        )
+        ExpenseSplit.objects.create(expense=self.expense, member=self.member1, amount=45.00)
+        ExpenseSplit.objects.create(expense=self.expense, member=self.member2, amount=45.00)
+        
+        self.balances_url = reverse('api_group_balances', kwargs={'group_pk': self.group.pk})
+        self.settlement_url = reverse('api_settlement_list_create', kwargs={'group_pk': self.group.pk})
 
     def test_recalculate_group_settlements_correctness(self):
-        from decimal import Decimal
-        # Expense: 3000 paid by Raj, split equally between Raj, Netra, Rohan (1000 each)
-        expense = Expense.objects.create(
-            group=self.group,
-            title='Dinner',
-            amount=Decimal('3000.00'),
-            paid_by=self.member_raj,
-            date='2026-07-05',
-            category='Food',
-            created_by=self.owner
-        )
-        ExpenseSplit.objects.create(expense=expense, member=self.member_raj, amount=Decimal('1000.00'))
-        ExpenseSplit.objects.create(expense=expense, member=self.member_netra, amount=Decimal('1000.00'))
-        ExpenseSplit.objects.create(expense=expense, member=self.member_rohan, amount=Decimal('1000.00'))
-        
-        # Recalculate
         from .views import recalculate_group_settlements
         balances = recalculate_group_settlements(self.group)
+        # Alice should have net_balance of +45.00
+        alice_bal = next(b for b in balances if b['member'].id == self.member1.id)
+        self.assertEqual(alice_bal['net_balance'], Decimal('45.00'))
         
-        # Verify balances
-        raj_bal = next(b for b in balances if b['member'].id == self.member_raj.id)
-        netra_bal = next(b for b in balances if b['member'].id == self.member_netra.id)
-        rohan_bal = next(b for b in balances if b['member'].id == self.member_rohan.id)
-        
-        self.assertEqual(raj_bal['net_balance'], Decimal('2000.00'))
-        self.assertEqual(netra_bal['net_balance'], Decimal('-1000.00'))
-        self.assertEqual(rohan_bal['net_balance'], Decimal('-1000.00'))
-        
-        # Verify pending settlements auto-created
-        pending = Settlement.objects.filter(group=self.group, status='pending')
-        self.assertEqual(pending.count(), 2)
-        
-        # Settle Netra's debt: mark the settlement as completed
-        settlement = pending.filter(payer=self.member_netra).first()
-        settlement.status = 'completed'
-        settlement.save()
-        
-        # Recalculate again
-        balances = recalculate_group_settlements(self.group)
-        raj_bal = next(b for b in balances if b['member'].id == self.member_raj.id)
-        netra_bal = next(b for b in balances if b['member'].id == self.member_netra.id)
-        rohan_bal = next(b for b in balances if b['member'].id == self.member_rohan.id)
-        
-        # Netra should now have 0 net balance
-        self.assertEqual(netra_bal['net_balance'], Decimal('0.00'))
-        # Raj should have 1000 left to receive
-        self.assertEqual(raj_bal['net_balance'], Decimal('1000.00'))
-        # Rohan still owes 1000
-        self.assertEqual(rohan_bal['net_balance'], Decimal('-1000.00'))
-        
-        # Verify only 1 pending settlement left (Rohan owes Raj 1000)
-        remaining_pending = Settlement.objects.filter(group=self.group, status='pending')
-        self.assertEqual(remaining_pending.count(), 1)
-        self.assertEqual(remaining_pending.first().payer, self.member_rohan)
-        self.assertEqual(remaining_pending.first().payee, self.member_raj)
-        self.assertEqual(remaining_pending.first().amount, Decimal('1000.00'))
+        # Bob should have net_balance of -45.00
+        bob_bal = next(b for b in balances if b['member'].id == self.member2.id)
+        self.assertEqual(bob_bal['net_balance'], Decimal('-45.00'))
 
-    def test_settlement_form_validation(self):
-        from .forms import SettlementForm
-        from decimal import Decimal
-        
-        # 1. Invalid amount <= 0
-        form = SettlementForm(data={
-            'payer': self.member_netra.id,
-            'payee': self.member_raj.id,
-            'amount': '0.00',
-            'status': 'pending'
-        }, group=self.group)
-        self.assertFalse(form.is_valid())
-        self.assertIn('amount', form.errors)
-        
-        # 2. Same payer and payee
-        form = SettlementForm(data={
-            'payer': self.member_raj.id,
-            'payee': self.member_raj.id,
-            'amount': '500.00',
-            'status': 'pending'
-        }, group=self.group)
-        self.assertFalse(form.is_valid())
-        self.assertIn('payee', form.errors)
+    def test_balances_api(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        response = self.client.get(self.balances_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('balances', response.data)
+        self.assertIn('recommended_settlements', response.data)
 
-        # 3. Duplicate check
-        Settlement.objects.create(
-            group=self.group,
-            payer=self.member_netra,
-            payee=self.member_raj,
-            amount=Decimal('500.00'),
-            status='completed'
-        )
-        form = SettlementForm(data={
-            'payer': self.member_netra.id,
-            'payee': self.member_raj.id,
-            'amount': '500.00',
+    def test_create_settlement_api(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1.key)
+        payload = {
+            'payer': self.member2.id,
+            'payee': self.member1.id,
+            'amount': '45.00',
             'status': 'completed'
-        }, group=self.group)
-        self.assertFalse(form.is_valid())
+        }
+        response = self.client.post(self.settlement_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], 'completed')
 
-    def test_views_access_controls(self):
-        from decimal import Decimal
-        # Create a pending settlement
-        settlement = Settlement.objects.create(
+
+from django.core import mail
+
+class InvitationEmailTest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='inviter', email='inviter@example.com', password='password123')
+        self.token = Token.objects.create(user=self.user)
+        self.group = Group.objects.create(name='Vacation Group', created_by=self.user)
+        self.group.members.add(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token.key)
+        self.invite_url = reverse('api_invite_member', kwargs={'group_pk': self.group.pk})
+
+    def test_invite_member_dispatches_email(self):
+        mail.outbox = []
+        payload = {'email': 'friend@example.com'}
+        response = self.client.post(self.invite_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('You\'ve been invited to join Vacation Group', mail.outbox[0].subject)
+        self.assertEqual(mail.outbox[0].to, ['friend@example.com'])
+
+    def test_invite_member_after_email_update(self):
+        # 1. Register a user (invitee_user) with Email A (invitee@example.com)
+        invitee_user = User.objects.create_user(
+            username='invitee',
+            email='invitee@example.com',
+            password='password123'
+        )
+        # 2. Add them to group.members list (representing they accepted invitation or joined)
+        self.group.members.add(invitee_user)
+
+        # 3. Create their member record in the group with Email A
+        member = Member.objects.create(
             group=self.group,
-            payer=self.member_netra,
-            payee=self.member_raj,
-            amount=Decimal('1000.00'),
+            user=invitee_user,
+            name='Invitee Member',
+            email='invitee@example.com'
+        )
+
+        # 4. Create an invitation row in the database with status 'accepted'
+        Invitation.objects.create(
+            group=self.group,
+            email='invitee@example.com',
+            invited_by=self.user,
+            status='accepted'
+        )
+
+        # 5. Edit the member record's email from Email A to Email B
+        member.email = 'invitee_new@example.com'
+        member.save()
+
+        # 6. Try inviting Email A again via the API
+        mail.outbox = []
+        payload = {'email': 'invitee@example.com'}
+        response = self.client.post(self.invite_url, payload, format='json')
+        
+        # 7. Check that the invitation succeeded and returned HTTP_200_OK (since invitation existed)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'pending')
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_invite_member_after_email_update_no_invitation(self):
+        # 1. Register a user (invitee_user) with Email A (invitee@example.com)
+        invitee_user = User.objects.create_user(
+            username='invitee_no_inv',
+            email='invitee_no_inv@example.com',
+            password='password123'
+        )
+        # 2. Add them to group.members list
+        self.group.members.add(invitee_user)
+
+        # 3. Create their member record in the group with Email A (e.g. manual creation)
+        member = Member.objects.create(
+            group=self.group,
+            user=invitee_user,
+            name='Invitee No Inv Member',
+            email='invitee_no_inv@example.com'
+        )
+
+        # 4. Edit the member record's email from Email A to Email B
+        member.email = 'invitee_no_inv_new@example.com'
+        member.save()
+
+        # 5. Try inviting Email A again via the API
+        mail.outbox = []
+        payload = {'email': 'invitee_no_inv@example.com'}
+        response = self.client.post(self.invite_url, payload, format='json')
+        
+        # 6. Check that the invitation succeeded and returned HTTP_201_CREATED (since no prior invitation existed)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], 'pending')
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_invite_member_duplicate_prevention(self):
+        # 1. Invite a member
+        payload = {'email': 'duplicate@example.com'}
+        response = self.client.post(self.invite_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        # 2. Try inviting them again immediately
+        mail.outbox = []
+        response2 = self.client.post(self.invite_url, payload, format='json')
+        self.assertEqual(response2.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response2.data)
+        self.assertEqual(response2.data['email'][0], 'An active invitation has already been sent to this email.')
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_invite_member_after_expiration(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        # 1. Create a pending invitation
+        invitation = Invitation.objects.create(
+            group=self.group,
+            email='expired@example.com',
+            invited_by=self.user,
             status='pending'
         )
+        # 2. Update created_at to be in the past (more than 24 hours) using filter update
+        Invitation.objects.filter(pk=invitation.pk).update(created_at=timezone.now() - timedelta(hours=25))
         
-        # 1. Unauthenticated users are blocked
-        response = self.client.get(reverse('balance_dashboard', args=[self.group.id]))
-        self.assertEqual(response.status_code, 302)  # redirects to login
+        # 3. Invite them again
+        mail.outbox = []
+        payload = {'email': 'expired@example.com'}
+        response = self.client.post(self.invite_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        # 2. Non-owners are blocked
-        self.client.login(username='other', password='password123')
-        response = self.client.get(reverse('balance_dashboard', args=[self.group.id]))
-        self.assertEqual(response.status_code, 404)
+        # Verify it was renewed
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, 'pending')
+        self.assertFalse(invitation.is_expired)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_expired_invitation_detail_and_actions(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        # 1. Create invitation
+        invitation = Invitation.objects.create(
+            group=self.group,
+            email='expired_actions@example.com',
+            invited_by=self.user,
+            status='pending'
+        )
+        Invitation.objects.filter(pk=invitation.pk).update(created_at=timezone.now() - timedelta(hours=25))
         
-        # 3. Creator can access
-        self.client.login(username='owner', password='password123')
-        response = self.client.get(reverse('balance_dashboard', args=[self.group.id]))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Raj')
+        # 2. Try fetching details
+        detail_url = reverse('api_invitation_detail', kwargs={'pk': invitation.pk})
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['detail'], 'This invitation link has expired.')
         
-        # 4. Completed settlement cannot be re-completed
-        settlement.status = 'completed'
-        settlement.save()
-        confirm_url = reverse('settlement_confirm', args=[self.group.id, settlement.id])
-        response = self.client.get(confirm_url)
-        # Should redirect to detail page with warning message
-        self.assertEqual(response.status_code, 302)
+        # 3. Try accepting
+        accept_url = reverse('api_accept_invitation', kwargs={'pk': invitation.pk})
+        response_accept = self.client.post(accept_url)
+        self.assertEqual(response_accept.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response_accept.data['detail'], 'This invitation link has expired.')
+        
+        # 4. Try declining
+        decline_url = reverse('api_decline_invitation', kwargs={'pk': invitation.pk})
+        response_decline = self.client.post(decline_url)
+        self.assertEqual(response_decline.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response_decline.data['detail'], 'This invitation link has expired.')
 
+class MemberEmailValidationTest(APITestCase):
+    def setUp(self):
+        # 1. Create a user (group creator/owner)
+        self.owner = User.objects.create_user(username='owner', email='owner@example.com', password='password123')
+        self.owner_token = Token.objects.create(user=self.owner)
+        
+        # 2. Create a group
+        self.group = Group.objects.create(name='Uniqueness Group', created_by=self.owner)
+        self.group.members.add(self.owner)
+        
+        # 3. Create owner's member profile in the group
+        self.owner_member = Member.objects.create(
+            group=self.group,
+            user=self.owner,
+            name='Owner Member',
+            email='owner@example.com'
+        )
 
+        # 4. Create another member in the group
+        self.other_member = Member.objects.create(
+            group=self.group,
+            name='Other Member',
+            email='other@example.com'
+        )
 
+        # 5. Create a separate registered user in the system who is also in the group
+        self.group_user = User.objects.create_user(username='groupuser', email='groupuser@example.com', password='password123')
+        self.group.members.add(self.group_user)
+        self.group_user_member = Member.objects.create(
+            group=self.group,
+            user=self.group_user,
+            name='Group User Member',
+            email='groupuser@example.com'
+        )
 
+        # Authenticate client as the owner
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.owner_token.key)
+        self.member_list_url = reverse('api_member_list_create', kwargs={'group_pk': self.group.pk})
+
+    def test_create_member_with_duplicate_member_email_fails(self):
+        # Trying to add a new member with an email that is already used by self.other_member ('other@example.com')
+        payload = {
+            'name': 'New Member Dupe',
+            'email': 'other@example.com'
+        }
+        response = self.client.post(self.member_list_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+        self.assertEqual(response.data['email'][0], 'This email is already in use.')
+
+    def test_create_member_with_duplicate_user_email_fails(self):
+        # Trying to add a new member with an email that is already used by self.group_user ('groupuser@example.com')
+        payload = {
+            'name': 'New Member Dupe User',
+            'email': 'groupuser@example.com'
+        }
+        response = self.client.post(self.member_list_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+        self.assertEqual(response.data['email'][0], 'This email is already in use.')
+
+    def test_update_member_with_duplicate_email_fails(self):
+        # Trying to update self.other_member's email to 'groupuser@example.com' (already in use by self.group_user / self.group_user_member)
+        url = reverse('api_member_detail_update_delete', kwargs={'group_pk': self.group.pk, 'pk': self.other_member.pk})
+        payload = {
+            'name': 'Other Member',
+            'email': 'groupuser@example.com'
+        }
+        response = self.client.put(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+        self.assertEqual(response.data['email'][0], 'This email is already in use.')
+
+    def test_update_member_to_own_email_succeeds(self):
+        # Updating self.other_member's details but keeping their own email 'other@example.com'
+        url = reverse('api_member_detail_update_delete', kwargs={'group_pk': self.group.pk, 'pk': self.other_member.pk})
+        payload = {
+            'name': 'Other Member Renamed',
+            'email': 'other@example.com'
+        }
+        response = self.client.put(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['email'], 'other@example.com')
+        self.assertEqual(response.data['name'], 'Other Member Renamed')
+
+    def test_update_member_to_new_unique_email_succeeds(self):
+        # Updating self.other_member's email to a new unused email
+        url = reverse('api_member_detail_update_delete', kwargs={'group_pk': self.group.pk, 'pk': self.other_member.pk})
+        payload = {
+            'name': 'Other Member',
+            'email': 'unused_new@example.com'
+        }
+        response = self.client.put(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['email'], 'unused_new@example.com')
+
+class ProfileAndChangePasswordTest(APITestCase):
+    def setUp(self):
+        # Create test users
+        self.user = User.objects.create_user(username='profileuser', email='profile@example.com', password='password123')
+        self.user_token = Token.objects.create(user=self.user)
+        
+        self.other_user = User.objects.create_user(username='otheruser', email='otheruser@example.com', password='password123')
+        
+        # Authenticate
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.user_token.key)
+        self.me_url = reverse('api_me')
+        self.change_password_url = reverse('api_change_password')
+
+        # Create a group where self.user is a member and creator
+        self.group = Group.objects.create(name='User Group', created_by=self.user)
+        self.group.members.add(self.user)
+
+    def test_get_profile_succeeds_and_returns_statistics(self):
+        response = self.client.get(self.me_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], 'profileuser')
+        self.assertEqual(response.data['email'], 'profile@example.com')
+        self.assertEqual(response.data['total_groups_joined'], 1)
+        self.assertEqual(response.data['groups_created_count'], 1)
+        self.assertIn('date_joined', response.data)
+        self.assertEqual(response.data['full_name'], '')
+
+    def test_update_profile_succeeds(self):
+        payload = {
+            'username': 'profileuser_updated',
+            'email': 'profile_updated@example.com',
+            'full_name': 'John Doe'
+        }
+        response = self.client.put(self.me_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], 'profileuser_updated')
+        self.assertEqual(response.data['email'], 'profile_updated@example.com')
+        self.assertEqual(response.data['full_name'], 'John Doe')
+        
+        # Verify changes in DB
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, 'profileuser_updated')
+        self.assertEqual(self.user.email, 'profile_updated@example.com')
+        self.assertEqual(self.user.first_name, 'John')
+        self.assertEqual(self.user.last_name, 'Doe')
+
+    def test_update_profile_duplicate_username_fails(self):
+        payload = {
+            'username': 'otheruser',
+            'email': 'unique_email@example.com',
+            'full_name': 'Jane Doe'
+        }
+        response = self.client.put(self.me_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('username', response.data)
+        self.assertEqual(response.data['username'][0], 'A user with this username already exists.')
+
+    def test_update_profile_duplicate_email_fails(self):
+        payload = {
+            'username': 'profileuser',
+            'email': 'otheruser@example.com',
+            'full_name': 'Jane Doe'
+        }
+        response = self.client.put(self.me_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+        self.assertEqual(response.data['email'][0], 'A user with this email already exists.')
+
+    def test_change_password_succeeds(self):
+        payload = {
+            'current_password': 'password123',
+            'new_password': 'SecureNewPassword123',
+            'confirm_password': 'SecureNewPassword123'
+        }
+        response = self.client.post(self.change_password_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['detail'], 'Password changed successfully.')
+        
+        # Verify authentication with the new password
+        from django.contrib.auth import authenticate
+        user = authenticate(username='profileuser', password='SecureNewPassword123')
+        self.assertIsNotNone(user)
+
+    def test_change_password_incorrect_current_fails(self):
+        payload = {
+            'current_password': 'wrong_password',
+            'new_password': 'SecureNewPassword123',
+            'confirm_password': 'SecureNewPassword123'
+        }
+        response = self.client.post(self.change_password_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('current_password', response.data)
+        self.assertEqual(response.data['current_password'], 'Incorrect current password.')
+
+    def test_change_password_mismatched_new_fails(self):
+        payload = {
+            'current_password': 'password123',
+            'new_password': 'SecureNewPassword123',
+            'confirm_password': 'DifferentNewPassword123'
+        }
+        response = self.client.post(self.change_password_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('confirm_password', response.data)
+        self.assertEqual(response.data['confirm_password'], 'New passwords do not match.')

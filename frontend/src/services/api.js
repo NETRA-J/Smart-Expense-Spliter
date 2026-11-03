@@ -28,7 +28,10 @@ API.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      const currentPath = window.location.pathname;
+      if (currentPath !== '/login' && currentPath !== '/register' && !currentPath.startsWith('/invitations/')) {
+        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+      }
     }
     return Promise.reject(error);
   }
@@ -39,6 +42,8 @@ export const loginUser = (data) => API.post('/login/', data);
 export const registerUser = (data) => API.post('/register/', data);
 export const logoutUser = () => API.post('/logout/');
 export const getMe = () => API.get('/me/');
+export const updateMe = (data) => API.put('/me/', data);
+export const changePassword = (data) => API.post('/change-password/', data);
 
 // --- Group APIs ---
 export const getGroups = () => API.get('/groups/');
@@ -79,8 +84,10 @@ export const setGroupBudget = (groupId, data) => API.post(`/groups/${groupId}/bu
 
 // --- Invitation APIs ---
 export const getInvitations = () => API.get('/invitations/');
+export const getInvitationDetail = (id) => API.get(`/invitations/${id}/`);
 export const acceptInvitation = (id) => API.post(`/invitations/${id}/accept/`);
 export const declineInvitation = (id) => API.post(`/invitations/${id}/decline/`);
 export const inviteMember = (groupId, data) => API.post(`/groups/${groupId}/invitations/`, data);
+export const getGroupInvitations = (groupId) => API.get(`/groups/${groupId}/invitations/list/`);
 
 export default API;

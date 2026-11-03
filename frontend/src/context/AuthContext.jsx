@@ -47,6 +47,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('user', JSON.stringify(userData));
       return { success: true };
     } catch (error) {
+      console.error('Login error details:', error.response?.data || error);
       return {
         success: false,
         error: error.response?.data?.detail || 'Invalid username or password.'
@@ -65,6 +66,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('user', JSON.stringify(userData));
       return { success: true };
     } catch (error) {
+      console.error('Register error details:', error.response?.data || error);
       return {
         success: false,
         errors: error.response?.data || { detail: 'Registration failed.' }
@@ -85,8 +87,13 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const updateUser = (newUserData) => {
+    setUser(newUserData);
+    localStorage.setItem('user', JSON.stringify(newUserData));
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
